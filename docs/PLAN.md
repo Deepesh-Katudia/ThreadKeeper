@@ -1,7 +1,7 @@
 # Threadkeeper: an agentic serial story writer with a human in the loop
 
 ## Context
-`docs/Take-Home Assignment_ Agentic Serial Story W.md` asks for a system that turns a one-line premise into a **200-episode serial** (400–700 words per episode, each ending on a hook) that stays consistent all the way through. A human must be able to approve the arc, review/edit/reject episodes, and give feedback that **carries forward** into later episodes. The system must also resume after stopping, log every run (steps, retries, tokens, cost, latency), cap cost per episode, and estimate the cost of all 200 episodes.
+a system that turns a one-line premise into a **200-episode serial** (400–700 words per episode, each ending on a hook) that stays consistent all the way through. A human must be able to approve the arc, review/edit/reject episodes, and give feedback that **carries forward** into later episodes. The system must also resume after stopping, log every run (steps, retries, tokens, cost, latency), cap cost per episode, and estimate the cost of all 200 episodes.
 Deliverables: repo + README, live URL (web), full arc plus ≥15 episodes with ≥2 HITL interventions, a screen recording, and a one-page `DECISIONS.md`.
 Graders care most about memory design at episode 150, HITL propagation, and honest reasoning. Polish matters less.
 
