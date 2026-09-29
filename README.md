@@ -4,7 +4,7 @@ An agentic system that writes a **200-episode serial story** from a one-line pre
 human in the loop who approves the arc, reviews every episode, and steers the story with
 feedback that carries forward.
 
-- **Backend**: Python, FastAPI, SQLAlchemy (SQLite locally, Postgres on Render)
+- **Backend**: Python, FastAPI, SQLAlchemy on Supabase Postgres (SQLite also works for offline use)
 - **Frontend**: Next.js on Vercel
 - **Models**: Claude Opus 5.5 plans the arc, Claude Sonnet 5.5 writes, Claude Haiku 4.5 keeps the
   continuity records, and a non-Claude model on OpenRouter plays the critic
@@ -39,7 +39,7 @@ cd backend
 python -m venv .venv
 .venv/Scripts/activate            # Windows. On macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env              # then fill in ANTHROPIC_API_KEY (and OPENROUTER / LANGSMITH keys)
+cp .env.example .env              # fill in DATABASE_URL (Supabase) and the API keys
 uvicorn main:app --reload         # http://localhost:8000/docs
 
 # 2. Frontend (new terminal)
@@ -77,7 +77,9 @@ python -m evals.run_evals --story 1     # LangSmith: word count, repetition, hoo
 
 ## Deploy
 
-- **Backend → Render**: `render.yaml` creates the web service and a Postgres database. Set
+- **Database → Supabase**: use the "Session pooler" connection string as `DATABASE_URL`. Tables are
+  created on first start with Row Level Security on, so Supabase's public REST API can't read them.
+- **Backend → Render**: `render.yaml` creates the web service. Set `DATABASE_URL`,
   `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `LANGSMITH_API_KEY`, `ACCESS_KEY` and
   `FRONTEND_ORIGINS` (your Vercel URL) in the Render dashboard.
 - **Frontend → Vercel**: root directory `frontend`, env var `NEXT_PUBLIC_API_URL` = the Render URL.

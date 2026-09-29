@@ -2,7 +2,7 @@
 
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from story import config
@@ -21,7 +21,8 @@ def make_engine(url: str):
     if url.startswith("sqlite"):
         # Background jobs run in worker threads, so SQLite has to allow that.
         return create_engine(url, connect_args={"check_same_thread": False})
-    return create_engine(url, pool_pre_ping=True)
+    # Supabase's free session pooler allows only a handful of connections, so keep the pool small.
+    return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5, pool_recycle=300)
 
 
 engine = make_engine(config.DATABASE_URL)
@@ -38,6 +39,20 @@ def use_database(url: str) -> None:
 
 def create_tables() -> None:
     Base.metadata.create_all(engine)
+    if engine.dialect.name == "postgresql":
+        lock_tables_from_public_api()
+
+
+def lock_tables_from_public_api() -> None:
+    """Switch on Row Level Security for every table, with no policies.
+
+    Supabase serves the public schema through its REST API to anyone holding the project's
+    anon key. RLS with no policies shuts that door, while our backend (connecting as the
+    table owner) keeps full access.
+    """
+    with engine.begin() as connection:
+        for table in Base.metadata.sorted_tables:
+            connection.execute(text(f'ALTER TABLE "{table.name}" ENABLE ROW LEVEL SECURITY'))
 
 
 @contextmanager
