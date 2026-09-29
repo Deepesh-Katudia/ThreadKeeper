@@ -170,6 +170,32 @@ export interface Costs {
   }[];
 }
 
+export type EvaluatorKey = "word_count" | "no_repetition" | "hook" | "consistency" | "follows_directives";
+
+export interface EvaluationRun {
+  id: number;
+  experiment_name: string;
+  experiment_url: string;
+  episodes_scored: number;
+  scores: Partial<Record<EvaluatorKey, number | null>>;
+  per_episode: ({ episode: number; comments: Partial<Record<EvaluatorKey, string>> } & Partial<Record<EvaluatorKey, number | null>>)[];
+  cost_usd: number;
+  created_at: string | null;
+}
+
+export interface Evaluations {
+  langsmith_enabled: boolean;
+  project_url: string | null;
+  judge_model: string;
+  approved_episodes: number;
+  estimated_cost_usd: number;
+  evaluations: EvaluationRun[];
+  critic_vs_human: {
+    agreement: number | null;
+    rows: { episode: number; critic_passed: boolean; hook_score: number | null; revisions: number; human: string; agrees: boolean }[];
+  };
+}
+
 export function getAccessKey(): string {
   try {
     return localStorage.getItem(ACCESS_KEY_STORAGE) ?? "";
@@ -264,4 +290,7 @@ export const api = {
   memory: (storyId: number) => request<Memory>(`/stories/${storyId}/memory`),
   costs: (storyId: number) => request<Costs>(`/stories/${storyId}/costs`),
   job: (jobId: number) => request<Job>(`/jobs/${jobId}`),
+
+  evaluations: (storyId: number) => request<Evaluations>(`/stories/${storyId}/evaluations`),
+  runEvaluation: (storyId: number) => post<{ job: Job }>(`/stories/${storyId}/evaluations`),
 };

@@ -170,6 +170,7 @@ export function StoryNav({ storyId, title }: { storyId: number; title: string })
     { href: `/stories/${storyId}`, label: "Arc" },
     { href: `/stories/${storyId}/episodes`, label: "Episodes" },
     { href: `/stories/${storyId}/memory`, label: "Memory" },
+    { href: `/stories/${storyId}/evals`, label: "Evals" },
     { href: `/stories/${storyId}/costs`, label: "Costs" },
   ];
   return (

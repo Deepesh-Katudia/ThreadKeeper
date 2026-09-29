@@ -154,6 +154,24 @@ class LLMCall(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class Evaluation(Base):
+    """One LangSmith experiment run over a story's approved episodes."""
+
+    __tablename__ = "evaluations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    story_id: Mapped[int] = mapped_column(Integer, index=True)
+    experiment_name: Mapped[str] = mapped_column(String(200), default="")
+    experiment_url: Mapped[str] = mapped_column(Text, default="")
+    episodes_scored: Mapped[int] = mapped_column(Integer, default=0)
+    # {"hook": 0.8, "consistency": 0.9, ...}: the average of each evaluator, 0..1
+    scores: Mapped[dict] = mapped_column(JSON, default=dict)
+    # [{"episode": 3, "hook": 0.8, ..., "comments": {"hook": "..."}}, ...]
+    per_episode: Mapped[list] = mapped_column(JSON, default=list)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class Job(Base):
     """A background task (planning the arc, writing an episode) the frontend can poll."""
 

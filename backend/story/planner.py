@@ -1,9 +1,9 @@
 """Planning the arc, and re-planning upcoming beats when the human steers."""
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 
 from langsmith import traceable
+from langsmith.utils import ContextThreadPoolExecutor
 from sqlalchemy import delete
 
 from story import config, llm, prompts
@@ -36,8 +36,9 @@ def plan_arc(story_id: int) -> None:
         bible_text = describe_bible(session, story_id)
 
     # Acts are planned in parallel: each one already knows its goal and turning point
-    # from the bible, so they don't need to wait for each other.
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    # from the bible, so they don't need to wait for each other. The context-aware pool
+    # keeps each act's calls nested under this plan_arc trace in LangSmith.
+    with ContextThreadPoolExecutor(max_workers=4) as pool:
         beats_per_act = list(pool.map(lambda act: plan_act_beats(story_id, bible_text, act, total), planned_acts))
 
     with session_scope() as session:

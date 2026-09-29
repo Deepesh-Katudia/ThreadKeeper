@@ -49,7 +49,10 @@ shows exactly what the writer saw for every episode.
   returns structured problems (contradiction / repetition / directive / hook score). "Revise"
   triggers a rewrite, capped at 2 revisions and a per-episode dollar limit.
 - After extraction, the new summary's word overlap with every earlier summary flags near-repeats.
-- Offline, LangSmith evals score consistency, hooks, directive-following and repetition.
+- Every critic verdict and every human decision is logged to the episode's LangSmith trace, so
+  critic-vs-human agreement is measured over time instead of assumed. That number decides how
+  much to trust batch auto-approve. On-demand LangSmith experiments score consistency, hooks,
+  directive-following and repetition across all approved episodes.
 
 ## 4. What breaks first as the story grows, and how would we fix it?
 

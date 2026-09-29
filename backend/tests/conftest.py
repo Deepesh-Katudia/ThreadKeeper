@@ -1,11 +1,14 @@
 """Test setup: a fresh SQLite file per test and a fake model that never costs money."""
 
+import os
 import re
 import sys
 from pathlib import Path
 
 import pytest
 
+# Tests must never send traces or feedback to the real LangSmith project.
+os.environ["LANGSMITH_TRACING"] = "false"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from story import db, llm  # noqa: E402
@@ -82,6 +85,10 @@ class FakeModel:
 
     def answer_Recap(self, prompt):
         return Recap(text="Recap of everything so far.")
+
+    def answer_Judgement(self, prompt):
+        from story.evaluation import Judgement
+        return Judgement(score=4, reason="Solid.")
 
     def prompts_for(self, schema_name: str) -> list[str]:
         return [p for name, p in self.prompts if name == schema_name]

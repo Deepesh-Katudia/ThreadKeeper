@@ -67,12 +67,32 @@ Without `OPENROUTER_API_KEY`, the critic falls back to Claude Haiku and logs a w
 4. **Resume**: close everything and come back later. State lives in the database, so writing
    continues at the first unapproved episode.
 
-## Tests and evals
+## Tracing and evaluation (LangSmith)
+
+With `LANGSMITH_TRACING=true`, every run is traced to the `threadkeeper` project: `plan_arc` →
+per-act planning, and `write_episode` → `draft` / `critic` / `revise` / `extract_memory`, with
+tokens, cost, model and latency on each step.
+
+Evaluation happens at two levels (`backend/story/evaluation.py`):
+
+1. **On every episode, at no extra cost.** The critic's verdict, hook score, length check, revision
+   count and repeat flag are attached to the episode's trace as LangSmith feedback. Your decision
+   is attached to the same trace as `human_decision` (approved = 1, edited = 0.5, rejected = 0,
+   with the reason). Story-wide direction is logged on the re-planning trace.
+2. **On demand.** The **Evals** tab (or `python -m evals.run_evals --story 1`) runs a LangSmith
+   experiment over every approved episode with five evaluators: length and repetition (code), and
+   hook, consistency with earlier canon, and following your direction (an LLM judge from a
+   different model family). The scores, per-episode notes and the experiment link are shown in the
+   app. It costs about $0.003 per episode.
+
+The Evals tab also shows how often the critic agreed with you, which tells you whether the critic
+can be trusted to auto-approve.
+
+## Tests
 
 ```bash
 cd backend
-pytest -q                               # uses a fake model, costs nothing
-python -m evals.run_evals --story 1     # LangSmith: word count, repetition, hook, consistency, directives
+pytest -q    # uses a fake model and never talks to LangSmith, costs nothing
 ```
 
 ## Deploy

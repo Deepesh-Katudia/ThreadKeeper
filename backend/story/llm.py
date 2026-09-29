@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import anthropic
 import httpx
-from langsmith import traceable
+from langsmith import get_current_run_tree, traceable
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
@@ -87,7 +87,10 @@ def write_text(
     max_tokens: int = 8000,
 ) -> str:
     """Ask a model for prose and return it."""
-    return _call(step, system, prompt, model, story_id, episode, max_tokens, schema=None)
+    return _call(
+        step, system, prompt, model, story_id, episode, max_tokens, schema=None,
+        langsmith_extra=_trace_labels(step, model, story_id, episode),
+    )
 
 
 def write_json(
@@ -101,7 +104,23 @@ def write_json(
     max_tokens: int = 16000,
 ):
     """Ask a model for JSON that matches `schema` and return the parsed object."""
-    return _call(step, system, prompt, model, story_id, episode, max_tokens, schema=schema)
+    return _call(
+        step, system, prompt, model, story_id, episode, max_tokens, schema=schema,
+        langsmith_extra=_trace_labels(step, model, story_id, episode),
+    )
+
+
+def _trace_labels(step: str, model: str, story_id: int, episode: int) -> dict:
+    """Name each LangSmith run after its step, and tag it so runs can be filtered by story and episode."""
+    provider = "openrouter" if is_openrouter_model(model) else "anthropic"
+    return {
+        "name": step,
+        "metadata": {
+            "story_id": story_id, "episode": episode,
+            "ls_provider": provider, "ls_model_name": model,
+        },
+        "tags": [f"story:{story_id}", f"step:{step}"],
+    }
 
 
 def episode_cost(story_id: int, episode: int) -> float:
@@ -137,7 +156,25 @@ def _call(step, system, prompt, model, story_id, episode, max_tokens, schema):
         raise LLMError(f"{step} failed on {model}: {error}") from error
 
     _record_call(step, model, story_id, episode, usage, started)
+    _attach_usage_to_trace(model, usage)
     return result
+
+
+def _attach_usage_to_trace(model: str, usage: Usage) -> None:
+    """Put tokens and dollars on the LangSmith run, so the trace view shows what each step cost."""
+    run = get_current_run_tree()
+    if run is None:
+        return
+    run.set(
+        usage_metadata={
+            "input_tokens": usage.input_tokens + usage.cache_write_tokens + usage.cache_read_tokens,
+            "output_tokens": usage.output_tokens,
+            "total_tokens": usage.input_tokens + usage.cache_write_tokens + usage.cache_read_tokens + usage.output_tokens,
+            "input_token_details": {"cache_read": usage.cache_read_tokens, "cache_creation": usage.cache_write_tokens},
+            "total_cost": price_of(model, usage),
+        },
+        metadata={"cost_usd": price_of(model, usage), "model_used": model},
+    )
 
 
 def _call_anthropic(system, prompt, model, max_tokens, schema):

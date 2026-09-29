@@ -15,7 +15,7 @@ import logging
 from langsmith import traceable
 from sqlalchemy import select
 
-from story import config, llm
+from story import config, evaluation, llm
 from story.context import build_episode_context
 from story.critic import needs_revision, review_draft, similar_earlier_episodes
 from story.db import session_scope
@@ -66,6 +66,7 @@ def write_episode(story_id: int, number: int) -> None:
         context, draft, report, attempts = draft_until_good_enough(story_id, number, editor_note)
         update = extract_memory(story_id, number, draft.text)
         report_dict = build_report(story_id, number, context, report, attempts, update)
+        report_dict["trace_run_id"] = evaluation.current_trace_run_id()
     except Exception as error:  # we want the reason on screen, not a dead background task
         log.exception("episode %s failed", number)
         with session_scope() as session:
@@ -82,6 +83,8 @@ def write_episode(story_id: int, number: int) -> None:
         episode.revision_count = len(attempts) - 1
         episode.was_edited_by_human = False
         episode.status = "in_review"
+
+    evaluation.log_critic_scores(report_dict["trace_run_id"], report_dict, count_words(draft.text))
 
 
 def draft_until_good_enough(story_id: int, number: int, editor_note: str):
@@ -162,12 +165,15 @@ def approve_episode(story_id: int, number: int) -> None:
         commit_memory(session, story_id, number, MemoryUpdate.model_validate(episode.pending_memory))
         episode.pending_memory = {}
         episode.status = "approved"
+        trace_run_id = episode.critic_report.get("trace_run_id")
         story = get_story(session, story_id)
         is_last_episode = number == story.total_episodes
         act = act_for_episode(session, story_id, number)
         ends_act = act is not None and act.last_episode == number
         if is_last_episode:
             story.status = "finished"
+
+    evaluation.log_human_decision(trace_run_id, "approved")
 
     if number % config.STORY_SO_FAR_EVERY == 0 or ends_act:
         refresh_story_so_far(story_id, number)
@@ -184,6 +190,9 @@ def edit_episode(story_id: int, number: int, new_text: str, new_title: str | Non
         if episode.status not in ("in_review", "approved"):
             raise NotAllowed(f"Episode {number} has no text to edit yet.")
         was_approved = episode.status == "approved"
+        trace_run_id = episode.critic_report.get("trace_run_id")
+
+    evaluation.log_human_decision(trace_run_id, "edited", "approved episode rewritten" if was_approved else "draft edited before approval")
 
     update = extract_memory(story_id, number, new_text)
 
@@ -220,6 +229,7 @@ def reject_episode(story_id: int, number: int, reason: str) -> None:
         episode = get_episode(session, story_id, number)
         if episode.status not in ("in_review", "failed", "stale"):
             raise NotAllowed(f"Episode {number} is '{episode.status}' and can't be rejected.")
+        evaluation.log_human_decision(episode.critic_report.get("trace_run_id"), "rejected", reason.strip())
         episode.status = "planned"
         episode.human_note = reason.strip()
         episode.pending_memory = {}
@@ -244,6 +254,7 @@ def give_feedback(story_id: int, text: str, expires_after_episode: int = 0) -> D
     # Only unwritten beats are re-planned. A draft already waiting for review stays as it is:
     # the human decides whether to approve it or reject it with the same note.
     what_changed = replan_upcoming_beats(story_id, text, after_episode)
+    evaluation.log_feedback(evaluation.current_trace_run_id(), "story_direction", value=text.strip(), comment=what_changed)
 
     with session_scope() as session:
         directive = session.get(Directive, directive_id)
