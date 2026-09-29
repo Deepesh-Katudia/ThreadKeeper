@@ -9,6 +9,24 @@ import { AutoTextarea, Card, ErrorBox, PaneBody, PaneHeader, Segmented, StatusBa
 import { api } from "@/lib/api";
 import { useLoader } from "@/lib/useLoader";
 
+const MIN_EPISODES = 10;
+const MAX_EPISODES = 200;
+const MIN_PREMISE_LENGTH = 10;
+
+/** Explains what's wrong before anything is sent, or returns null when all is fine. */
+function checkNewSerial(premise: string, totalEpisodes: number): string | null {
+  if (premise.trim().length < MIN_PREMISE_LENGTH) {
+    return `Write a premise of at least ${MIN_PREMISE_LENGTH} characters.`;
+  }
+  if (!Number.isInteger(totalEpisodes)) {
+    return `Episodes must be a whole number between ${MIN_EPISODES} and ${MAX_EPISODES}.`;
+  }
+  if (totalEpisodes < MIN_EPISODES || totalEpisodes > MAX_EPISODES) {
+    return `Episodes must be between ${MIN_EPISODES} and ${MAX_EPISODES} (the arc is split into 8 acts).`;
+  }
+  return null;
+}
+
 const EXAMPLE_PREMISE =
   "A delivery rider realizes every address on today's route belongs to someone who died in the same building.";
 
@@ -39,7 +57,8 @@ export default function HomePage() {
     }
   }
 
-  const canSubmit = !isCreating && premise.trim().length >= 10;
+  const problem = checkNewSerial(premise, totalEpisodes);
+  const canSubmit = !isCreating && problem === null;
 
   return (
     <>
@@ -83,11 +102,12 @@ export default function HomePage() {
                 Episodes
                 <input
                   type="number"
-                  min={10}
-                  max={200}
-                  value={totalEpisodes}
-                  onChange={(e) => setTotalEpisodes(Number(e.target.value))}
-                  className="w-20 rounded-md border border-line bg-field px-2 py-1 text-xs text-fg"
+                  min={MIN_EPISODES}
+                  max={MAX_EPISODES}
+                  value={Number.isNaN(totalEpisodes) ? "" : totalEpisodes}
+                  onChange={(e) => setTotalEpisodes(e.target.valueAsNumber)}
+                  aria-invalid={problem !== null && problem.startsWith("Episodes")}
+                  className="w-20 rounded-md border border-line bg-field px-2 py-1 text-xs text-fg aria-invalid:border-amber-500/60"
                 />
               </label>
             </div>
@@ -115,8 +135,10 @@ export default function HomePage() {
                 <ReturnIcon />
               </button>
             </div>
-            <p className="mt-2 text-[11px] text-faint">
-              {isCreating ? "Starting…" : "Enter plans the arc: a story bible, then every act's episode beats. Takes a few minutes and about $1."}
+            <p className={`mt-2 text-[11px] ${problem ? "text-amber-400" : "text-faint"}`}>
+              {isCreating
+                ? "Starting…"
+                : problem ?? "Enter plans the arc: a story bible, then every act's episode beats. Takes a few minutes and about $1."}
             </p>
           </Card>
         </div>

@@ -51,5 +51,18 @@ def test_access_key_is_required_when_configured(fake_model, monkeypatch):
     assert api.get("/health").status_code == 200
 
 
+def test_validation_errors_come_back_as_plain_sentences(fake_model):
+    api = client()
+
+    too_few = api.post("/stories", json={"premise": "A rider's deliveries all go to the dead.", "total_episodes": 1})
+    too_short = api.post("/stories", json={"premise": "short", "total_episodes": 20})
+    missing = api.post("/stories", json={})
+
+    assert too_few.status_code == 422
+    assert too_few.json()["detail"] == "Number of episodes must be at least 10."
+    assert too_short.json()["detail"] == "The premise is too short: use at least 10 characters."
+    assert missing.json()["detail"] == "The premise is required."
+
+
 def test_missing_things_return_404(fake_model):
     assert client().get("/stories/999").status_code == 404

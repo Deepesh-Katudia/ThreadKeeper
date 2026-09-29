@@ -186,26 +186,49 @@ export function setAccessKey(key: string): void {
   }
 }
 
+const FALLBACK_MESSAGES: Record<number, string> = {
+  401: "The access key is missing or wrong. Set it with the key button at the bottom of the sidebar.",
+  404: "That doesn't exist (any more). It may have been deleted.",
+  409: "That can't be done right now. Refresh the page and try again.",
+  422: "Some of the values entered aren't valid. Please check them and try again.",
+  500: "Something went wrong on the server. Please try again.",
+  502: "The AI model call failed. Please try again in a moment.",
+};
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Access-Key": getAccessKey(),
-      ...(options.headers ?? {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Access-Key": getAccessKey(),
+        ...(options.headers ?? {}),
+      },
+    });
+  } catch {
+    throw new Error("Can't reach the Threadkeeper server. Check that the backend is running and try again.");
+  }
   if (!response.ok) {
-    let message = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json();
-      message = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
-    } catch {
-      // The body wasn't JSON; keep the status text.
-    }
-    throw new Error(message);
+    throw new Error(await readableError(response));
   }
   return response.json() as Promise<T>;
+}
+
+/** The backend sends plain sentences; anything else is turned into one here. */
+async function readableError(response: Response): Promise<string> {
+  const fallback = FALLBACK_MESSAGES[response.status] ?? `Something went wrong (error ${response.status}). Please try again.`;
+  try {
+    const body = await response.json();
+    if (typeof body.detail === "string" && body.detail.trim()) return body.detail;
+    if (Array.isArray(body.detail)) {
+      const messages = body.detail.map((item: { msg?: string }) => item.msg).filter(Boolean);
+      if (messages.length) return messages.join(". ") + ".";
+    }
+  } catch {
+    // Not JSON: use the fallback.
+  }
+  return fallback;
 }
 
 const post = <T>(path: string, body: unknown = {}) => request<T>(path, { method: "POST", body: JSON.stringify(body) });

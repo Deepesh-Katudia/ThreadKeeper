@@ -4,10 +4,12 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api import routes_episodes, routes_memory, routes_stories
+from api.errors import readable_validation_message
 from api.jobs import JobAlreadyRunning
 from story import config
 from story.db import create_tables
@@ -50,6 +52,11 @@ def health():
     return {"ok": True}
 
 
+@app.exception_handler(RequestValidationError)
+def invalid_request(_request: Request, error: RequestValidationError):
+    return JSONResponse(status_code=422, content={"detail": readable_validation_message(error.errors())})
+
+
 @app.exception_handler(NotFound)
 def not_found(_request: Request, error: NotFound):
     return JSONResponse(status_code=404, content={"detail": str(error)})
@@ -67,4 +74,13 @@ def busy(_request: Request, error: JobAlreadyRunning):
 
 @app.exception_handler(LLMError)
 def model_failed(_request: Request, error: LLMError):
-    return JSONResponse(status_code=502, content={"detail": str(error)})
+    return JSONResponse(status_code=502, content={"detail": f"The AI model call failed: {error}. Please try again."})
+
+
+@app.exception_handler(Exception)
+def unexpected(_request: Request, error: Exception):
+    logging.getLogger("threadkeeper").exception("unhandled error")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Something went wrong on the server. Please try again; if it keeps happening, check the backend logs."},
+    )
