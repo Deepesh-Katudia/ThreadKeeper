@@ -1,12 +1,92 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Design tokens. Dark is the default look; light mirrors it. */
+:root,
+[data-theme="dark"] {
+  --bg: #000000;
+  --panel: #0a0a0a;
+  --subtle: #262626;
+  --field: #171717;
+  --line: #242424;
+  --line-strong: #333333;
+  --fg: #fafafa;
+  --muted: #a1a1a1;
+  --faint: #6b6b6b;
+  --accent: #fafafa;
+  --accent-fg: #000000;
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --panel: #fafafa;
+  --subtle: #f0f0f0;
+  --field: #f5f5f5;
+  --line: #e5e5e5;
+  --line-strong: #d4d4d4;
+  --fg: #0a0a0a;
+  --muted: #666666;
+  --faint: #9a9a9a;
+  --accent: #0a0a0a;
+  --accent-fg: #ffffff;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-subtle: var(--subtle);
+  --color-field: var(--field);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-prose), Georgia, serif;
+}
+
+html,
 body {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+/* Text boxes grow with their content instead of cutting it off. */
+textarea.auto-grow {
+  field-sizing: content;
+  resize: none;
+  overflow: hidden;
+  /* field-sizing also widens the box to its longest line; pin the width to the container. */
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .prose-episode {
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.05rem;
-  line-height: 1.75;
+  font-family: var(--font-serif);
+  font-size: 1.08rem;
+  font-weight: 400;
+  line-height: 1.8;
+  color: color-mix(in srgb, var(--fg) 86%, var(--bg));
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Quiet scrollbars, like the panes they sit in. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
 }

@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Inter_Tight, Source_Serif_4 } from "next/font/google";
+
+import { AppShell } from "@/components/AppShell";
 import "./globals.css";
+
+const ui = Inter_Tight({ subsets: ["latin"], variable: "--font-ui" });
+const prose = Source_Serif_4({ subsets: ["latin"], variable: "--font-prose" });
 
 export const metadata: Metadata = {
   title: "Threadkeeper",
@@ -9,15 +14,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className="h-full antialiased">
-      <body className="min-h-full bg-zinc-50 text-zinc-900">
-        <header className="border-b border-zinc-200 bg-white">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-            <Link href="/" className="text-lg font-bold tracking-tight">Threadkeeper</Link>
-            <span className="text-xs text-zinc-500">serial story writer · human in the loop</span>
-          </div>
-        </header>
-        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+    <html lang="en" data-theme="dark" className={`${ui.variable} ${prose.variable} h-full`} suppressHydrationWarning>
+      <body className="h-full overflow-hidden">
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

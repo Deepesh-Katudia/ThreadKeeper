@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 
-import { Button, ErrorBox } from "@/components/ui";
+import { ReturnIcon } from "@/components/icons";
+import { AutoTextarea, ErrorBox } from "@/components/ui";
 import { api, Job } from "@/lib/api";
 
-const EXAMPLES = ["Slow down the romance.", "Kill off the landlord within the next few episodes.", "More humour in the dialogue."];
+const PLACEHOLDER = "Steer the rest of the story… e.g. “Slow down the romance” or “Kill off the landlord soon”";
 
 /** Story-wide feedback: becomes a standing instruction and re-plans the upcoming beats. */
 export function FeedbackBox({
@@ -21,6 +22,8 @@ export function FeedbackBox({
   const [expiresAfter, setExpiresAfter] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
+  const canSubmit = !isBusy && text.trim().length >= 3;
+
   async function submit() {
     setError(null);
     try {
@@ -33,33 +36,41 @@ export function FeedbackBox({
   }
 
   return (
-    <div className="space-y-2 rounded border border-violet-200 bg-violet-50 p-4">
-      <h3 className="font-semibold">Steer the rest of the story</h3>
-      <p className="text-sm text-zinc-600">
-        Feedback here is saved as a standing instruction that every future episode sees, and the next 20 unwritten
-        beats are re-planned around it. To fix only the episode in front of you, use Reject or Edit instead.
-      </p>
-      <ErrorBox message={error} />
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={EXAMPLES.join("  ·  ")}
-        rows={2}
-        className="w-full rounded border border-zinc-300 bg-white p-2 text-sm"
-      />
-      <div className="flex items-center gap-3">
-        <label className="text-sm">
-          Applies until episode{" "}
+    <div className="rounded-xl border border-line bg-panel p-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Story direction</h3>
+        <label className="flex items-center gap-2 text-[11px] text-muted">
+          Applies until episode
           <input
             type="number"
             min={0}
             value={expiresAfter}
             onChange={(e) => setExpiresAfter(Number(e.target.value))}
-            className="w-20 rounded border border-zinc-300 px-1"
-          />{" "}
-          <span className="text-zinc-500">(0 = rest of the story)</span>
+            className="w-16 rounded-md border border-line bg-field px-2 py-0.5 text-xs text-fg"
+          />
+          <span className="text-faint">(0 = forever)</span>
         </label>
-        <Button onClick={submit} disabled={isBusy || text.trim().length < 3}>Give feedback &amp; re-plan</Button>
+      </div>
+      <p className="mb-2 text-[11px] text-faint">
+        Saved as a standing instruction that every future episode sees; the next 20 unwritten beats are re-planned around it.
+      </p>
+      <ErrorBox message={error} />
+      <div className="mt-2 flex items-end gap-2 rounded-lg border border-line bg-field p-1.5">
+        <AutoTextarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && canSubmit) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder={PLACEHOLDER}
+          className="border-0 bg-transparent focus:border-0"
+        />
+        <button onClick={submit} disabled={!canSubmit} title="Give feedback & re-plan (Enter)" className="mb-0.5 rounded-md p-2 text-muted hover:bg-subtle hover:text-fg disabled:opacity-40">
+          <ReturnIcon />
+        </button>
       </div>
     </div>
   );

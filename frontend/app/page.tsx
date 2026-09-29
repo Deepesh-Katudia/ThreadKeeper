@@ -4,19 +4,27 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { Button, ErrorBox, Section, StatusBadge } from "@/components/ui";
-import { api, setAccessKey } from "@/lib/api";
+import { ReturnIcon } from "@/components/icons";
+import { AutoTextarea, Card, ErrorBox, PaneBody, PaneHeader, Segmented, StatusBadge } from "@/components/ui";
+import { api } from "@/lib/api";
 import { useLoader } from "@/lib/useLoader";
 
 const EXAMPLE_PREMISE =
   "A delivery rider realizes every address on today's route belongs to someone who died in the same building.";
 
+const ABOUT_TABS = {
+  about: "Threadkeeper plans and writes a 200-episode serial from a one-line premise. You approve the arc, review every episode, and steer the story with feedback that carries forward.",
+  memory: "Each episode is written from a fixed-size memory: the arc plan, a rolling recap, the last eight summaries, the characters and facts in play, open threads, and your standing instructions. Episode 150 costs the same to write as episode 5.",
+  controls: "Approve an episode to make it canon. Edit it (even after approval) and its memory is rebuilt. Reject it with a note to get a rewrite. Or give story-wide feedback, which re-plans the next 20 beats.",
+};
+
 export default function HomePage() {
   const router = useRouter();
-  const { data: stories, error, setError, reload: loadStories } = useLoader(api.listStories);
+  const { data: stories } = useLoader(api.listStories);
+  const [tab, setTab] = useState<keyof typeof ABOUT_TABS>("about");
   const [premise, setPremise] = useState(EXAMPLE_PREMISE);
   const [totalEpisodes, setTotalEpisodes] = useState(200);
-  const [accessKey, setKey] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   async function createStory() {
@@ -31,80 +39,88 @@ export default function HomePage() {
     }
   }
 
-  function saveKey() {
-    setAccessKey(accessKey);
-    setKey("");
-    loadStories();
-  }
+  const canSubmit = !isCreating && premise.trim().length >= 10;
 
   return (
-    <div>
-      <Section title="Access key">
-        <div className="flex gap-2">
-          <input
-            type="password"
-            value={accessKey}
-            onChange={(e) => setKey(e.target.value)}
-            placeholder="Passcode from the backend's ACCESS_KEY (remembered in this browser)"
-            className="w-80 rounded border border-zinc-300 px-3 py-1.5 text-sm"
-          />
-          <Button variant="secondary" onClick={saveKey}>Save</Button>
-        </div>
-      </Section>
-
-      <ErrorBox message={error} />
-
-      <Section title="Start a new serial">
-        <div className="space-y-3 rounded border border-zinc-200 bg-white p-4">
-          <label className="block text-sm font-medium">One-line premise</label>
-          <textarea
-            value={premise}
-            onChange={(e) => setPremise(e.target.value)}
-            rows={3}
-            className="w-full rounded border border-zinc-300 p-2 text-sm"
-          />
-          <div className="flex items-center gap-3">
-            <label className="text-sm">Episodes</label>
-            <input
-              type="number"
-              min={10}
-              max={200}
-              value={totalEpisodes}
-              onChange={(e) => setTotalEpisodes(Number(e.target.value))}
-              className="w-24 rounded border border-zinc-300 px-2 py-1 text-sm"
+    <>
+      <PaneHeader title="Serials" />
+      <PaneBody className="flex flex-col">
+        <div className="mx-auto w-full max-w-2xl">
+          <Card className="p-5">
+            <h2 className="mb-3 text-xl font-semibold tracking-tight">Threadkeeper</h2>
+            <Segmented
+              options={[
+                { value: "about", label: "About" },
+                { value: "memory", label: "Memory" },
+                { value: "controls", label: "Controls" },
+              ]}
+              active={tab}
+              onChange={(value) => setTab(value as keyof typeof ABOUT_TABS)}
             />
-            <Button onClick={createStory} disabled={isCreating || premise.trim().length < 10}>
-              {isCreating ? "Starting..." : "Plan the arc"}
-            </Button>
-          </div>
-          <p className="text-xs text-zinc-500">
-            Planning takes a few minutes: the story bible first, then all acts&apos; episode beats in parallel.
-          </p>
-        </div>
-      </Section>
+            <p className="mt-4 text-sm leading-relaxed text-muted">{ABOUT_TABS[tab]}</p>
+          </Card>
 
-      <Section title="Your serials">
-        {!stories || stories.length === 0 ? (
-          <p className="text-sm text-zinc-500">No stories yet.</p>
-        ) : (
-          <ul className="divide-y divide-zinc-200 rounded border border-zinc-200 bg-white">
-            {stories.map((story) => (
-              <li key={story.id}>
-                <Link href={`/stories/${story.id}`} className="flex items-center justify-between p-3 hover:bg-zinc-50">
-                  <div>
-                    <p className="font-medium">{story.title || "(planning...)"}</p>
-                    <p className="text-sm text-zinc-500">{story.premise}</p>
-                  </div>
-                  <div className="flex items-center gap-3 text-sm text-zinc-600">
-                    {story.approved_episodes}/{story.total_episodes} written
+          {/* On phones the sidebar is hidden, so list the stories here. */}
+          {!!stories?.length && (
+            <div className="mt-6 space-y-2 md:hidden">
+              {stories.map((story) => (
+                <Link key={story.id} href={`/stories/${story.id}`} className="block rounded-lg border border-line p-3 hover:bg-subtle">
+                  <span className="flex items-start justify-between gap-2">
+                    <span className="text-sm font-medium break-words">{story.title || "Planning…"}</span>
                     <StatusBadge status={story.status} />
-                  </div>
+                  </span>
                 </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
-    </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-auto pt-8">
+          <Card className="mx-auto w-full max-w-3xl p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-base font-semibold">New serial</h3>
+              <label className="flex items-center gap-2 text-xs text-muted">
+                Episodes
+                <input
+                  type="number"
+                  min={10}
+                  max={200}
+                  value={totalEpisodes}
+                  onChange={(e) => setTotalEpisodes(Number(e.target.value))}
+                  className="w-20 rounded-md border border-line bg-field px-2 py-1 text-xs text-fg"
+                />
+              </label>
+            </div>
+            <ErrorBox message={error} />
+            <div className="mt-2 flex items-end gap-2 rounded-lg border border-line bg-field p-2">
+              <AutoTextarea
+                value={premise}
+                onChange={(e) => setPremise(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && canSubmit) {
+                    e.preventDefault();
+                    createStory();
+                  }
+                }}
+                placeholder="One-line premise…"
+                rows={2}
+                className="border-0 bg-transparent focus:border-0"
+              />
+              <button
+                onClick={createStory}
+                disabled={!canSubmit}
+                title="Plan the arc (Enter)"
+                className="mb-1 rounded-md p-2 text-muted hover:bg-subtle hover:text-fg disabled:opacity-40"
+              >
+                <ReturnIcon />
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-faint">
+              {isCreating ? "Starting…" : "Enter plans the arc: a story bible, then every act's episode beats. Takes a few minutes and about $1."}
+            </p>
+          </Card>
+        </div>
+      </PaneBody>
+    </>
   );
 }
