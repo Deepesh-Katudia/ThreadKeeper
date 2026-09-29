@@ -1,0 +1,256 @@
+"""The only file that talks to model providers.
+
+Everything else calls `write_text` or `write_json` with a step name and a model. We record
+every call (tokens, cost, latency, errors) in the llm_calls table and, when LangSmith
+tracing is switched on, as a LangSmith run.
+"""
+
+import json
+import logging
+import time
+from dataclasses import dataclass
+
+import anthropic
+import httpx
+from langsmith import traceable
+from pydantic import BaseModel
+from sqlalchemy import func, select
+
+from story import config
+from story.db import session_scope
+from story.models import LLMCall
+
+log = logging.getLogger(__name__)
+
+FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
+
+class LLMError(RuntimeError):
+    pass
+
+
+@dataclass
+class Usage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    cost_usd: float | None = None  # OpenRouter tells us the cost directly
+
+
+_anthropic_client: anthropic.Anthropic | None = None
+
+
+def anthropic_client() -> anthropic.Anthropic:
+    global _anthropic_client
+    if _anthropic_client is None:
+        if not config.ANTHROPIC_API_KEY:
+            raise LLMError("ANTHROPIC_API_KEY is not set. Add it to backend/.env.")
+        _anthropic_client = anthropic.Anthropic(
+            api_key=config.ANTHROPIC_API_KEY, timeout=config.LLM_TIMEOUT_SECONDS
+        )
+    return _anthropic_client
+
+
+def is_openrouter_model(model: str) -> bool:
+    # OpenRouter model ids look like "vendor/model"; Anthropic ids never have a slash.
+    return "/" in model
+
+
+def price_of(model: str, usage: Usage) -> float:
+    if usage.cost_usd is not None:
+        return usage.cost_usd
+    price = config.PRICES.get(model)
+    if price is None:
+        return 0.0
+    dollars = (
+        usage.input_tokens * price.input
+        + usage.output_tokens * price.output
+        + usage.cache_read_tokens * price.cache_read
+        + usage.cache_write_tokens * price.cache_write
+    )
+    return round(dollars / 1_000_000, 6)
+
+
+# ---------------------------------------------------------------------------
+# Public helpers
+# ---------------------------------------------------------------------------
+
+
+def write_text(
+    step: str,
+    system: str,
+    prompt: str,
+    model: str,
+    story_id: int = 0,
+    episode: int = 0,
+    max_tokens: int = 8000,
+) -> str:
+    """Ask a model for prose and return it."""
+    return _call(step, system, prompt, model, story_id, episode, max_tokens, schema=None)
+
+
+def write_json(
+    step: str,
+    system: str,
+    prompt: str,
+    schema: type[BaseModel],
+    model: str,
+    story_id: int = 0,
+    episode: int = 0,
+    max_tokens: int = 16000,
+):
+    """Ask a model for JSON that matches `schema` and return the parsed object."""
+    return _call(step, system, prompt, model, story_id, episode, max_tokens, schema=schema)
+
+
+def episode_cost(story_id: int, episode: int) -> float:
+    """Dollars spent so far on one episode, across every attempt."""
+    with session_scope() as session:
+        total = session.scalar(
+            select(func.coalesce(func.sum(LLMCall.cost_usd), 0.0)).where(
+                LLMCall.story_id == story_id, LLMCall.episode_number == episode
+            )
+        )
+    return float(total or 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Plumbing
+# ---------------------------------------------------------------------------
+
+
+@traceable(run_type="llm", name="llm_call")
+def _call(step, system, prompt, model, story_id, episode, max_tokens, schema):
+    if is_openrouter_model(model) and not config.OPENROUTER_API_KEY:
+        log.warning("OPENROUTER_API_KEY missing; %s falls back to %s", step, config.EXTRACTOR_MODEL)
+        model = config.EXTRACTOR_MODEL
+
+    started = time.perf_counter()
+    try:
+        if is_openrouter_model(model):
+            result, usage = _call_openrouter(system, prompt, model, max_tokens, schema)
+        else:
+            result, usage = _call_anthropic(system, prompt, model, max_tokens, schema)
+    except Exception as error:
+        _record_call(step, model, story_id, episode, Usage(), started, error=str(error))
+        raise LLMError(f"{step} failed on {model}: {error}") from error
+
+    _record_call(step, model, story_id, episode, usage, started)
+    return result
+
+
+def _call_anthropic(system, prompt, model, max_tokens, schema):
+    client = anthropic_client()
+    request = {
+        "model": model,
+        "max_tokens": max_tokens,
+        # The system prompt (story bible, style guide) repeats across calls, so cache it.
+        "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if model in config.MODELS_WITH_EFFORT:
+        effort = config.PLANNER_EFFORT if model == config.PLANNER_MODEL else config.WRITER_EFFORT
+        request["output_config"] = {"effort": effort}
+        # If a safety classifier declines (dark themes happen in fiction), let the API
+        # retry on a fallback model instead of failing the whole episode.
+        request["betas"] = [FALLBACK_BETA]
+        request["fallbacks"] = "default"
+
+    if schema is None:
+        if "betas" in request:
+            response = client.beta.messages.create(**request)
+        else:
+            response = client.messages.create(**request)
+    else:
+        if "betas" in request:
+            response = client.beta.messages.parse(output_format=schema, **request)
+        else:
+            response = client.messages.parse(output_format=schema, **request)
+
+    if response.stop_reason == "refusal":
+        raise LLMError("the model declined this request")
+    if response.stop_reason == "max_tokens":
+        raise LLMError(f"ran out of tokens (max_tokens={max_tokens})")
+
+    usage = Usage(
+        input_tokens=response.usage.input_tokens or 0,
+        output_tokens=response.usage.output_tokens or 0,
+        cache_read_tokens=response.usage.cache_read_input_tokens or 0,
+        cache_write_tokens=response.usage.cache_creation_input_tokens or 0,
+    )
+    if schema is not None:
+        return response.parsed_output, usage
+    text = "".join(block.text for block in response.content if block.type == "text")
+    return text.strip(), usage
+
+
+def _call_openrouter(system, prompt, model, max_tokens, schema):
+    body = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        "usage": {"include": True},
+    }
+    if schema is not None:
+        body["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": schema.__name__, "strict": True, "schema": schema.model_json_schema()},
+        }
+
+    response = httpx.post(
+        config.OPENROUTER_URL,
+        headers={"Authorization": f"Bearer {config.OPENROUTER_API_KEY}"},
+        json=body,
+        timeout=config.LLM_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if "error" in data:
+        raise LLMError(str(data["error"]))
+
+    text = data["choices"][0]["message"]["content"] or ""
+    raw_usage = data.get("usage") or {}
+    usage = Usage(
+        input_tokens=raw_usage.get("prompt_tokens", 0),
+        output_tokens=raw_usage.get("completion_tokens", 0),
+        cost_usd=raw_usage.get("cost"),
+    )
+    if schema is None:
+        return text.strip(), usage
+    return schema.model_validate(json.loads(_strip_code_fence(text))), usage
+
+
+def _strip_code_fence(text: str) -> str:
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        text = text.rsplit("```", 1)[0]
+    return text
+
+
+def _record_call(step, model, story_id, episode, usage: Usage, started: float, error: str = ""):
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    call = LLMCall(
+        story_id=story_id,
+        episode_number=episode,
+        step=step,
+        model=model,
+        input_tokens=usage.input_tokens + usage.cache_write_tokens,
+        output_tokens=usage.output_tokens,
+        cache_read_tokens=usage.cache_read_tokens,
+        cost_usd=price_of(model, usage),
+        latency_ms=latency_ms,
+        succeeded=not error,
+        error=error[:2000],
+    )
+    with session_scope() as session:
+        session.add(call)
+    log.info(
+        "%s | %s | in=%s out=%s | $%.4f | %sms%s",
+        step, model, call.input_tokens, call.output_tokens, call.cost_usd, latency_ms,
+        f" | ERROR {error[:120]}" if error else "",
+    )
