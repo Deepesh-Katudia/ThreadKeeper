@@ -10,9 +10,11 @@ from story.models import Base
 
 
 def _fix_postgres_url(url: str) -> str:
-    # Render hands out "postgres://" URLs; SQLAlchemy wants "postgresql://".
-    if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql://", 1)
+    # Some hosts hand out "postgres://" URLs, and SQLAlchemy 2.1 picks the psycopg v3 driver for a
+    # bare "postgresql://". We ship psycopg2, so say so explicitly.
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg2://" + url[len(prefix):]
     return url
 
 
