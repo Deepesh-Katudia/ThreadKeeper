@@ -100,8 +100,10 @@ pytest -q    # uses a fake model and never talks to LangSmith, costs nothing
 - **Database → Supabase**: use the "Session pooler" connection string as `DATABASE_URL`. Tables are
   created on first start with Row Level Security on, so Supabase's public REST API can't read them.
 - **Backend → Render**: `render.yaml` creates the web service. Set `DATABASE_URL`,
-  `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `LANGSMITH_API_KEY`, `ACCESS_KEY` and
+  `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `LANGSMITH_API_KEY` and
   `FRONTEND_ORIGINS` (your Vercel URL) in the Render dashboard.
 - **Frontend → Vercel**: root directory `frontend`, env var `NEXT_PUBLIC_API_URL` = the Render URL.
-- Set spending limits in the Anthropic and OpenRouter consoles. The app itself caps each episode
+- **The app is open to anyone with the URL** (no passcode) so reviewers can test it. Set spending
+  limits in the Anthropic and OpenRouter consoles. To lock it again, set `ACCESS_KEY` on the
+  backend: every request must then send it in an `X-Access-Key` header. The app itself caps each episode
   at `EPISODE_COST_CAP_USD` (default $0.25) and allows at most `MAX_REVISIONS` (default 2).

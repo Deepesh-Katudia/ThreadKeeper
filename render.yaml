@@ -23,7 +23,5 @@ services:
         value: "true"
       - key: LANGSMITH_PROJECT
         value: threadkeeper
-      - key: ACCESS_KEY
-        sync: false
       - key: FRONTEND_ORIGINS
         sync: false

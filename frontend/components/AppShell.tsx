@@ -2,16 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, type ReactNode } from "react";
 
-import { KeyIcon, LogoMark, MoonIcon, PlusIcon } from "@/components/icons";
-import { Button, TextInput } from "@/components/ui";
-import { api, setAccessKey } from "@/lib/api";
+import { LogoMark, MoonIcon, PlusIcon } from "@/components/icons";
+import { api } from "@/lib/api";
 import { useLoader } from "@/lib/useLoader";
 
 const THEME_STORAGE = "threadkeeper-theme";
 
-/** Sidebar on the left (stories, theme, access key), the current page on the right. */
+/** Sidebar on the left (stories and theme), the current page on the right. */
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-full">
@@ -69,32 +68,9 @@ function Sidebar() {
 }
 
 function SidebarFooter() {
-  const [isKeyOpen, setIsKeyOpen] = useState(false);
-  const [key, setKey] = useState("");
-  const [saved, setSaved] = useState(false);
-
-  function saveKey() {
-    setAccessKey(key);
-    setKey("");
-    setSaved(true);
-  }
-
   return (
-    <div className="border-t border-line p-2">
-      {isKeyOpen && (
-        <div className="mb-2 space-y-2 rounded-lg border border-line bg-bg p-2">
-          <p className="text-[11px] text-muted">Access key (the backend&apos;s ACCESS_KEY). Stored in this browser only.</p>
-          <TextInput type="password" value={key} onChange={(e) => { setKey(e.target.value); setSaved(false); }} placeholder="Passcode" />
-          <div className="flex items-center gap-2">
-            <Button variant="primary" onClick={saveKey} disabled={!key}>Save</Button>
-            {saved && <span className="text-[11px] text-emerald-400">Saved</span>}
-          </div>
-        </div>
-      )}
-      <div className="flex gap-1.5">
-        <IconButton title="Toggle light / dark" onClick={toggleTheme}><MoonIcon /></IconButton>
-        <IconButton title="Access key" onClick={() => setIsKeyOpen(!isKeyOpen)}><KeyIcon /></IconButton>
-      </div>
+    <div className="flex gap-1.5 border-t border-line p-2">
+      <IconButton title="Toggle light / dark" onClick={toggleTheme}><MoonIcon /></IconButton>
     </div>
   );
 }

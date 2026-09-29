@@ -1,7 +1,6 @@
 // Typed helpers for talking to the Threadkeeper backend.
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const ACCESS_KEY_STORAGE = "threadkeeper-access-key";
 
 export type StoryStatus = "planning" | "planning_failed" | "arc_review" | "writing" | "finished";
 export type EpisodeStatus = "planned" | "drafting" | "in_review" | "approved" | "failed" | "stale";
@@ -196,24 +195,8 @@ export interface Evaluations {
   };
 }
 
-export function getAccessKey(): string {
-  try {
-    return localStorage.getItem(ACCESS_KEY_STORAGE) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-export function setAccessKey(key: string): void {
-  try {
-    localStorage.setItem(ACCESS_KEY_STORAGE, key);
-  } catch {
-    // Storage can be blocked (private mode); the key just won't be remembered.
-  }
-}
-
 const FALLBACK_MESSAGES: Record<number, string> = {
-  401: "The access key is missing or wrong. Set it with the key button at the bottom of the sidebar.",
+  401: "The server refused the request (it may have an ACCESS_KEY set). Remove ACCESS_KEY on the backend to open it up.",
   404: "That doesn't exist (any more). It may have been deleted.",
   409: "That can't be done right now. Refresh the page and try again.",
   422: "Some of the values entered aren't valid. Please check them and try again.",
@@ -228,7 +211,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        "X-Access-Key": getAccessKey(),
         ...(options.headers ?? {}),
       },
     });
