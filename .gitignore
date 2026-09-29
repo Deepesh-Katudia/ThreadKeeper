@@ -8,3 +8,6 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+frontend/CLAUDE.md
+frontend/AGENTS.md
+frontend/next-env.d.ts

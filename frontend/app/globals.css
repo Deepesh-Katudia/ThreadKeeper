@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.prose-episode {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.05rem;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
