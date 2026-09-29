@@ -253,12 +253,13 @@ def give_feedback(story_id: int, text: str, expires_after_episode: int = 0) -> D
 
     # Only unwritten beats are re-planned. A draft already waiting for review stays as it is:
     # the human decides whether to approve it or reject it with the same note.
-    what_changed = replan_upcoming_beats(story_id, text, after_episode)
+    what_changed, beat_changes = replan_upcoming_beats(story_id, text, after_episode)
     evaluation.log_feedback(evaluation.current_trace_run_id(), "story_direction", value=text.strip(), comment=what_changed)
 
     with session_scope() as session:
         directive = session.get(Directive, directive_id)
         directive.replan_summary = what_changed
+        directive.beat_changes = beat_changes
     return directive
 
 

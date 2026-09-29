@@ -131,6 +131,8 @@ class Directive(Base):
     expires_after_episode: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     replan_summary: Mapped[str] = mapped_column(Text, default="")
+    # [{"episode": 7, "before": "...", "after": "..."}]: proof the feedback reached future episodes
+    beat_changes: Mapped[list | None] = mapped_column(JSON, default=list, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 

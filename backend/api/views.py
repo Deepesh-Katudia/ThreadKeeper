@@ -78,6 +78,7 @@ def directive_view(directive: Directive) -> dict:
         "id": directive.id, "text": directive.text, "given_after_episode": directive.given_after_episode,
         "expires_after_episode": directive.expires_after_episode, "is_active": directive.is_active,
         "replan_summary": directive.replan_summary,
+        "beat_changes": directive.beat_changes or [],
     }
 
 

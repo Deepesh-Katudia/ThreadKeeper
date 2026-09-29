@@ -35,6 +35,22 @@ def test_dead_characters_named_in_a_draft_are_flagged_for_checking():
     assert [p.kind for p in problems] == ["check"]
 
 
+def test_new_model_columns_are_added_to_an_older_database(tmp_path):
+    from sqlalchemy import inspect, text
+
+    from story import db
+
+    url = f"sqlite:///{tmp_path / 'old.db'}"
+    old_engine = db.make_engine(url)
+    with old_engine.begin() as connection:  # a directives table from before beat_changes existed
+        connection.execute(text("CREATE TABLE directives (id INTEGER PRIMARY KEY, story_id INTEGER, text TEXT)"))
+
+    db.use_database(url)
+
+    columns = {c["name"] for c in inspect(db.engine).get_columns("directives")}
+    assert {"beat_changes", "replan_summary", "is_active"} <= columns
+
+
 def test_near_duplicate_summaries_are_detected():
     earlier = {
         3: "Ravi delivers a parcel to flat 9B and finds the door sealed with wax.",

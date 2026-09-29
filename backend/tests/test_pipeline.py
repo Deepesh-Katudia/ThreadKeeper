@@ -5,7 +5,7 @@ import pytest
 from story import config, pipeline
 from story.context import build_episode_context
 from story.db import session_scope
-from story.models import Story
+from story.models import Directive, Story
 from story.planner import plan_arc
 from story.queries import acts, all_episodes, characters, facts, find_character, get_episode, get_story
 
@@ -107,9 +107,12 @@ def test_feedback_becomes_a_standing_instruction_and_replans_upcoming_beats(fake
     story_id = new_story()
     write_and_approve(story_id, 2)
 
-    pipeline.give_feedback(story_id, "Kill off Mr Das soon.")
+    directive = pipeline.give_feedback(story_id, "Kill off Mr Das soon.")
 
     with session_scope() as session:
+        saved = session.get(Directive, directive.id)
+        assert saved.beat_changes[0] == {"episode": 3, "before": "beat 3", "after": "replanned beat 3"}
+        assert all(change["episode"] > 2 for change in saved.beat_changes)
         assert get_episode(session, story_id, 2).beat == "beat 2"  # history untouched
         assert get_episode(session, story_id, 3).beat == "replanned beat 3"
         context = build_episode_context(session, story_id, 3)

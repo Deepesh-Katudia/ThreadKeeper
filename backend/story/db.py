@@ -2,7 +2,7 @@
 
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from story import config
@@ -41,8 +41,28 @@ def use_database(url: str) -> None:
 
 def create_tables() -> None:
     Base.metadata.create_all(engine)
+    add_missing_columns()
     if engine.dialect.name == "postgresql":
         lock_tables_from_public_api()
+
+
+def add_missing_columns() -> None:
+    """A tiny migration: add columns that exist in the models but not yet in the database.
+
+    create_all only creates missing tables, so a column added to an existing table (like
+    directives.beat_changes) would otherwise never reach a database created earlier.
+    New columns must be nullable for this to work on tables that already have rows.
+    """
+    existing_tables = set(inspect(engine).get_table_names())
+    with engine.begin() as connection:
+        for table in Base.metadata.sorted_tables:
+            if table.name not in existing_tables:
+                continue
+            have = {column["name"] for column in inspect(connection).get_columns(table.name)}
+            for column in table.columns:
+                if column.name not in have:
+                    column_type = column.type.compile(dialect=engine.dialect)
+                    connection.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column_type}'))
 
 
 def lock_tables_from_public_api() -> None:

@@ -120,6 +120,7 @@ export interface Directive {
   expires_after_episode: number;
   is_active: boolean;
   replan_summary: string;
+  beat_changes: { episode: number; before: string; after: string }[];
 }
 
 export interface Memory {

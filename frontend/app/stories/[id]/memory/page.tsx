@@ -52,6 +52,22 @@ export default function MemoryPage() {
                         {d.is_active ? "" : " · retired"}
                       </p>
                       {d.replan_summary && <p className="mt-2 text-sm break-words text-muted">Re-plan: {d.replan_summary}</p>}
+                      {d.beat_changes.length > 0 && (
+                        <details className="mt-3 rounded-lg border border-line">
+                          <summary className="cursor-pointer px-3 py-2 text-xs text-muted hover:text-fg">
+                            {d.beat_changes.length} upcoming beat{d.beat_changes.length === 1 ? "" : "s"} changed by this instruction
+                          </summary>
+                          <ul className="divide-y divide-line border-t border-line text-sm">
+                            {d.beat_changes.map((change) => (
+                              <li key={change.episode} className="grid gap-1 px-3 py-2 md:grid-cols-[3rem_1fr_1fr] md:gap-3">
+                                <span className="text-xs text-faint">ep {change.episode}</span>
+                                <span className="break-words text-faint line-through decoration-faint/50">{change.before}</span>
+                                <span className="break-words">{change.after}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
                     </div>
                     {d.is_active && <Button variant="ghost" onClick={() => retire(d.id)}>Retire</Button>}
                   </Card>

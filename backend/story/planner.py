@@ -139,18 +139,21 @@ Threads:
 
 
 @traceable(name="replan_upcoming_beats")
-def replan_upcoming_beats(story_id: int, feedback: str, after_episode: int) -> str:
-    """Rewrite the next few unwritten beats so they follow the human's feedback."""
+def replan_upcoming_beats(story_id: int, feedback: str, after_episode: int) -> tuple[str, list[dict]]:
+    """Rewrite the next few unwritten beats so they follow the human's feedback.
+
+    Returns the planner's summary and every beat that changed, before and after.
+    """
     with session_scope() as session:
         upcoming = [
             e for e in episodes_between(session, story_id, after_episode + 1, after_episode + REPLAN_WINDOW)
             if e.status in ("planned", "stale", "failed")
         ]
         if not upcoming:
-            return "No unwritten beats left to change."
+            return "No unwritten beats left to change.", []
         bible_text = describe_bible(session, story_id)
         beats_text = "\n".join(f"{e.number}. {e.beat}" for e in upcoming)
-        numbers = {e.number for e in upcoming}
+        old_beats = {e.number: e.beat for e in upcoming}
 
     result = llm.write_json(
         "replan_beats", prompts.planner_system(),
@@ -158,12 +161,16 @@ def replan_upcoming_beats(story_id: int, feedback: str, after_episode: int) -> s
         Replan, config.PLANNER_MODEL, story_id=story_id,
     )
 
+    changes = [
+        {"episode": b.episode, "before": old_beats[b.episode], "after": b.beat.strip()}
+        for b in result.beats
+        if b.episode in old_beats and b.beat.strip() != old_beats[b.episode]
+    ]
     with session_scope() as session:
-        for new_beat in result.beats:
-            if new_beat.episode in numbers:
-                episode = next(e for e in episodes_between(session, story_id, new_beat.episode, new_beat.episode))
-                episode.beat = new_beat.beat
-    return result.what_changed
+        for change in changes:
+            episode = next(e for e in episodes_between(session, story_id, change["episode"], change["episode"]))
+            episode.beat = change["after"]
+    return result.what_changed, changes
 
 
 def reset_plan(story_id: int) -> None:
