@@ -17,6 +17,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from functools import lru_cache
 
 from langsmith import Client, evaluate, get_current_run_tree
 from pydantic import BaseModel, ConfigDict
@@ -56,12 +57,17 @@ def current_trace_run_id() -> str | None:
     return str(run.id) if run is not None else None
 
 
+@lru_cache(maxsize=1)
+def tracing_project():
+    """The LangSmith project our traces go to (looked up once)."""
+    return langsmith_client().read_project(project_name=os.getenv("LANGSMITH_PROJECT", "default"))
+
+
 def project_url() -> str | None:
     if not langsmith_enabled():
         return None
     try:
-        project = langsmith_client().read_project(project_name=os.getenv("LANGSMITH_PROJECT", "default"))
-        return project.url
+        return tracing_project().url
     except Exception as error:
         log.warning("couldn't look up the LangSmith project URL: %s", error)
         return None
@@ -80,7 +86,10 @@ def log_feedback(run_id: str | None, key: str, score: float | None = None, value
 
 def _send_feedback(run_id, key, score, value, comment) -> None:
     try:
-        langsmith_client().create_feedback(run_id, key, score=score, value=value, comment=comment or None)
+        # Naming the project (session) is required by newer LangSmith versions.
+        langsmith_client().create_feedback(
+            run_id, key, score=score, value=value, comment=comment or None, session_id=tracing_project().id,
+        )
     except Exception as error:  # feedback is nice to have; never break the story over it
         log.warning("LangSmith feedback %s on run %s failed: %s", key, run_id, error)
 
