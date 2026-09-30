@@ -19,10 +19,10 @@ class ModelPrice:
 
 
 # Which model does which job. Ids with a "/" go through OpenRouter; the rest go straight
-# to the Anthropic API. Planning uses Anthropic directly; writing, memory and the critic
-# run on OpenRouter. The critic is a different model family on purpose: a judge that isn't
+# to the Anthropic API (e.g. PLANNER_MODEL=claude-opus-5-5). Everything runs on OpenRouter
+# by default. The critic is a different model family on purpose: a judge that isn't
 # Claude is less likely to wave through the writer's own habits.
-PLANNER_MODEL = os.getenv("PLANNER_MODEL", "claude-opus-5-5")
+PLANNER_MODEL = os.getenv("PLANNER_MODEL", "anthropic/claude-opus-5.5")
 WRITER_MODEL = os.getenv("WRITER_MODEL", "anthropic/claude-sonnet-5.5")
 EXTRACTOR_MODEL = os.getenv("EXTRACTOR_MODEL", "anthropic/claude-haiku-4.5")
 CRITIC_MODEL = os.getenv("CRITIC_MODEL", "google/gemini-2.5-flash")
@@ -35,6 +35,7 @@ PRICES = {
     "claude-haiku-4-5": ModelPrice(input=1.00, output=5.00, cache_read=0.10, cache_write=1.25),
     # Same models through OpenRouter, same list prices. OpenRouter normally reports the exact
     # cost with each response; these are only used when it doesn't.
+    "anthropic/claude-opus-5.5": ModelPrice(input=4.00, output=20.00, cache_read=0.20, cache_write=5.00),
     "anthropic/claude-sonnet-5.5": ModelPrice(input=2.00, output=10.00, cache_read=0.20, cache_write=2.50),
     "anthropic/claude-haiku-4.5": ModelPrice(input=1.00, output=5.00, cache_read=0.10, cache_write=1.25),
 }

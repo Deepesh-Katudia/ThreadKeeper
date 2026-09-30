@@ -65,6 +65,10 @@ def direct_anthropic_model(openrouter_model: str) -> str:
     return config.DIRECT_FALLBACK_MODEL
 
 
+def effort_for(model: str) -> str:
+    return config.PLANNER_EFFORT if model == config.PLANNER_MODEL else config.WRITER_EFFORT
+
+
 def price_of(model: str, usage: Usage) -> float:
     if usage.cost_usd is not None:
         return usage.cost_usd
@@ -196,8 +200,7 @@ def _call_anthropic(system, prompt, model, max_tokens, schema):
         "messages": [{"role": "user", "content": prompt}],
     }
     if model in config.MODELS_WITH_EFFORT:
-        effort = config.PLANNER_EFFORT if model == config.PLANNER_MODEL else config.WRITER_EFFORT
-        request["output_config"] = {"effort": effort}
+        request["output_config"] = {"effort": effort_for(model)}
         # If a safety classifier declines (dark themes happen in fiction), let the API
         # retry on a fallback model instead of failing the whole episode.
         request["betas"] = [FALLBACK_BETA]
@@ -250,7 +253,7 @@ def _call_openrouter(system, prompt, model, max_tokens, schema):
         body["provider"] = {"require_parameters": True}
     if model in config.MODELS_WITH_EFFORT:
         # Same thinking budget as the direct API; left unset, Sonnet 5.5 thinks at "high" and costs ~2x.
-        body["reasoning"] = {"effort": config.WRITER_EFFORT}
+        body["reasoning"] = {"effort": effort_for(model)}
 
     response = httpx.post(
         config.OPENROUTER_URL,

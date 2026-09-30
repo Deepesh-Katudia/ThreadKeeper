@@ -6,10 +6,10 @@ feedback that carries forward.
 
 - **Backend**: Python, FastAPI, SQLAlchemy on Supabase Postgres (SQLite also works for offline use)
 - **Frontend**: Next.js on Vercel
-- **Models**: Claude Opus 5.5 plans the arc (Anthropic API). Through OpenRouter, Claude Sonnet 5.5
-  writes and revises, Claude Haiku 4.5 keeps the continuity records, and Gemini 2.5 Flash, a
-  non-Claude model, plays the critic. Any model can be swapped with the `*_MODEL` env vars: ids
-  with a `/` go through OpenRouter, the rest go to Anthropic directly.
+- **Models** (all through OpenRouter): Claude Opus 5.5 plans the arc, Claude Sonnet 5.5 writes and
+  revises, Claude Haiku 4.5 keeps the continuity records, and Gemini 2.5 Flash, a non-Claude
+  model, plays the critic. Any model can be swapped with the `*_MODEL` env vars: ids with a `/`
+  go through OpenRouter, the rest (e.g. `claude-opus-5-5`) go to the Anthropic API directly.
 - **Tracing and evals**: LangSmith, plus a per-call cost ledger in the database
 
 How it remembers, where the human steps in, and what breaks first are covered in
