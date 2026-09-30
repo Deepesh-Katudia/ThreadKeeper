@@ -126,7 +126,7 @@ def episodes_markdown(data) -> str:
         if episode.was_edited_by_human:
             facts.append("edited by a human")
         if episode.human_note:
-            facts.append(f"rewritten after rejection: \"{episode.human_note}\"")
+            facts.append(f"rewritten after rejection: \"{unquote(episode.human_note)}\"")
         lines += [
             "---",
             "",
@@ -162,7 +162,7 @@ def interventions_markdown(data) -> str:
     for number, directive in enumerate(data["directives"], start=1):
         scope = f"until ep {directive.expires_after_episode}" if directive.expires_after_episode else "for the rest of the story"
         lines += [
-            f"### {number}. \"{directive.text}\"",
+            f"### {number}. \"{unquote(directive.text)}\"",
             "",
             f"Given after episode {directive.given_after_episode}, {scope}{'' if directive.is_active else ' (later retired)'}.",
             "",
@@ -183,7 +183,7 @@ def interventions_markdown(data) -> str:
     rejected = [e for e in data["episodes"] if e.human_note]
     edited = [e for e in data["episodes"] if e.was_edited_by_human]
     lines += ["## Rejected drafts (rewritten with the reviewer's note)", ""]
-    lines += [f"- Ep {e.number}: \"{e.human_note}\". Rewritten as \"{e.title}\"." for e in rejected] or ["*(none)*"]
+    lines += [f"- Ep {e.number}: \"{unquote(e.human_note)}\". Rewritten as \"{e.title}\"." for e in rejected] or ["*(none)*"]
     lines += ["", "## Episodes edited by a human", ""]
     lines += [f"- Ep {e.number} \"{e.title}\": its memory (facts, deaths, threads) was re-extracted from the edited text." for e in edited] or ["*(none)*"]
 
@@ -271,6 +271,11 @@ def stats_markdown(data) -> str:
             lines += ["", f"Experiment: {latest.experiment_url}"]
     lines.append("")
     return "\n".join(lines)
+
+
+def unquote(text: str) -> str:
+    """People often type instructions wrapped in quotes; don't double them up."""
+    return (text or "").strip().strip('"\u201c\u201d').strip()
 
 
 def cell(text: str) -> str:

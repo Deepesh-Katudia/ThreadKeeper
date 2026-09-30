@@ -11,7 +11,28 @@ feedback that carries forward.
 - **Tracing and evals**: LangSmith, plus a per-call cost ledger in the database
 
 How it remembers, where the human steps in, and what breaks first are covered in
-[DECISIONS.md](DECISIONS.md). Cost and time estimates are in [COSTS.md](COSTS.md).
+[DECISIONS.md](DECISIONS.md). Measured cost and time are in [COSTS.md](COSTS.md).
+
+## Submission at a glance
+
+- **Live app:** https://threadkeeper-nine.vercel.app (open, no login). The backend is on Render's free
+  plan, so the first request after a quiet spell takes about 50 s to wake it.
+- **Demo story:** *Dead Letter Route*, from the example premise in the brief: "A delivery rider
+  realizes every address on today's route belongs to someone who died in the same building."
+  - [`docs/demo/arc.md`](docs/demo/arc.md): the full 200-episode plan (8 acts, every beat, cast, threads)
+  - [`docs/demo/episodes.md`](docs/demo/episodes.md): the written episodes, each with its critic score, revisions and cost
+  - [`docs/demo/interventions.md`](docs/demo/interventions.md): the human interventions, with the beats they changed
+  - [`docs/demo/run-stats.md`](docs/demo/run-stats.md): measured cost, tokens and latency, plus LangSmith evaluation scores
+- **What the demo shows:** arc approval; 4 approved episodes; one draft rejected with a note
+  ("More dialogue with Toby, less rain") and rewritten; one story-direction instruction ("Kill off
+  Harlan Oduya") that re-planned 6 upcoming beats; and a LangSmith evaluation of all approved
+  episodes.
+- **What it doesn't (honestly):** the brief asks for 15+ episodes and 2+ interventions. The run
+  stopped at episode 5 when our Anthropic account hit the monthly spending limit we had set
+  ("You have reached your specified API usage limits"). Episode 5 is stored as *failed* with that
+  reason. Once the limit resets, pressing "Write episode 5" resumes exactly where it stopped,
+  which is the resume path from the brief. At the measured $0.076 per episode, the remaining
+  11 episodes cost about $0.85.
 
 ## How it works
 
