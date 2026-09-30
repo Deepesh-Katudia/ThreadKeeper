@@ -1,12 +1,16 @@
 """Database connection and a session helper."""
 
+import logging
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from story import config
 from story.models import Base
+
+log = logging.getLogger(__name__)
 
 
 def _fix_postgres_url(url: str) -> str:
@@ -43,7 +47,11 @@ def create_tables() -> None:
     Base.metadata.create_all(engine)
     add_missing_columns()
     if engine.dialect.name == "postgresql":
-        lock_tables_from_public_api()
+        try:
+            lock_tables_from_public_api()
+        except OperationalError as error:
+            # Hardening, not a reason to refuse to start: the next start will try again.
+            log.warning("couldn't switch on row level security this time: %s", error)
 
 
 def add_missing_columns() -> None:
@@ -71,10 +79,20 @@ def lock_tables_from_public_api() -> None:
     Supabase serves the public schema through its REST API to anyone holding the project's
     anon key. RLS with no policies shuts that door, while our backend (connecting as the
     table owner) keeps full access.
+
+    Only tables that don't have RLS yet are touched. ALTER TABLE takes an exclusive lock, and
+    during a zero-downtime deploy the old server is still reading these tables, so running it
+    on every start deadlocked (and crashed) the new server.
     """
     with engine.begin() as connection:
+        unlocked = set(connection.execute(text(
+            "SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND NOT rowsecurity"
+        )).scalars())
+        # Never queue behind the live server's locks for long; give up and retry next start.
+        connection.execute(text("SET LOCAL lock_timeout = '5s'"))
         for table in Base.metadata.sorted_tables:
-            connection.execute(text(f'ALTER TABLE "{table.name}" ENABLE ROW LEVEL SECURITY'))
+            if table.name in unlocked:
+                connection.execute(text(f'ALTER TABLE "{table.name}" ENABLE ROW LEVEL SECURITY'))
 
 
 @contextmanager
