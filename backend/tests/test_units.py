@@ -51,6 +51,14 @@ def test_new_model_columns_are_added_to_an_older_database(tmp_path):
     assert {"beat_changes", "replan_summary", "is_active"} <= columns
 
 
+def test_openrouter_models_fall_back_to_their_direct_anthropic_twin():
+    from story.llm import direct_anthropic_model
+
+    assert direct_anthropic_model("anthropic/claude-sonnet-5.5") == "claude-sonnet-5-5"
+    assert direct_anthropic_model("anthropic/claude-haiku-4.5") == "claude-haiku-4-5"
+    assert direct_anthropic_model("google/gemini-2.5-flash") == config.DIRECT_FALLBACK_MODEL
+
+
 def test_near_duplicate_summaries_are_detected():
     earlier = {
         3: "Ravi delivers a parcel to flat 9B and finds the door sealed with wax.",

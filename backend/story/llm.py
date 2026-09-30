@@ -57,6 +57,14 @@ def is_openrouter_model(model: str) -> bool:
     return "/" in model
 
 
+def direct_anthropic_model(openrouter_model: str) -> str:
+    """'anthropic/claude-sonnet-5.5' -> 'claude-sonnet-5-5'. Non-Claude models get a Claude stand-in."""
+    vendor, _, name = openrouter_model.partition("/")
+    if vendor == "anthropic":
+        return name.replace(".", "-")
+    return config.DIRECT_FALLBACK_MODEL
+
+
 def price_of(model: str, usage: Usage) -> float:
     if usage.cost_usd is not None:
         return usage.cost_usd
@@ -142,8 +150,9 @@ def episode_cost(story_id: int, episode: int) -> float:
 @traceable(run_type="llm", name="llm_call")
 def _call(step, system, prompt, model, story_id, episode, max_tokens, schema):
     if is_openrouter_model(model) and not config.OPENROUTER_API_KEY:
-        log.warning("OPENROUTER_API_KEY missing; %s falls back to %s", step, config.EXTRACTOR_MODEL)
-        model = config.EXTRACTOR_MODEL
+        direct = direct_anthropic_model(model)
+        log.warning("OPENROUTER_API_KEY missing; %s falls back to %s on the Anthropic API", step, direct)
+        model = direct
 
     started = time.perf_counter()
     try:
@@ -227,7 +236,7 @@ def _call_openrouter(system, prompt, model, max_tokens, schema):
         "model": model,
         "max_tokens": max_tokens,
         "messages": [
-            {"role": "system", "content": system},
+            {"role": "system", "content": _openrouter_system(system, model)},
             {"role": "user", "content": prompt},
         ],
         "usage": {"include": True},
@@ -237,6 +246,11 @@ def _call_openrouter(system, prompt, model, max_tokens, schema):
             "type": "json_schema",
             "json_schema": {"name": schema.__name__, "strict": True, "schema": schema.model_json_schema()},
         }
+        # Only route to providers that actually enforce the schema.
+        body["provider"] = {"require_parameters": True}
+    if model in config.MODELS_WITH_EFFORT:
+        # Same thinking budget as the direct API; left unset, Sonnet 5.5 thinks at "high" and costs ~2x.
+        body["reasoning"] = {"effort": config.WRITER_EFFORT}
 
     response = httpx.post(
         config.OPENROUTER_URL,
@@ -249,16 +263,28 @@ def _call_openrouter(system, prompt, model, max_tokens, schema):
     if "error" in data:
         raise LLMError(str(data["error"]))
 
-    text = data["choices"][0]["message"]["content"] or ""
+    choice = data["choices"][0]
+    if choice.get("finish_reason") == "length":
+        raise LLMError(f"ran out of tokens (max_tokens={max_tokens})")
+    text = choice["message"]["content"] or ""
     raw_usage = data.get("usage") or {}
+    cached = (raw_usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0) or 0
     usage = Usage(
-        input_tokens=raw_usage.get("prompt_tokens", 0),
+        input_tokens=raw_usage.get("prompt_tokens", 0) - cached,
         output_tokens=raw_usage.get("completion_tokens", 0),
+        cache_read_tokens=cached,
         cost_usd=raw_usage.get("cost"),
     )
     if schema is None:
         return text.strip(), usage
     return schema.model_validate(json.loads(_strip_code_fence(text))), usage
+
+
+def _openrouter_system(system: str, model: str):
+    """Claude models on OpenRouter honour Anthropic's cache_control, so cache the stable system prompt."""
+    if model.startswith("anthropic/"):
+        return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    return system
 
 
 def _strip_code_fence(text: str) -> str:

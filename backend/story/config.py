@@ -18,21 +18,29 @@ class ModelPrice:
     cache_write: float = 0.0
 
 
-# Which model does which job. The critic lives on OpenRouter on purpose: a judge from a
-# different model family is less likely to wave through the writer's own habits.
+# Which model does which job. Ids with a "/" go through OpenRouter; the rest go straight
+# to the Anthropic API. Planning uses Anthropic directly; writing, memory and the critic
+# run on OpenRouter. The critic is a different model family on purpose: a judge that isn't
+# Claude is less likely to wave through the writer's own habits.
 PLANNER_MODEL = os.getenv("PLANNER_MODEL", "claude-opus-5-5")
-WRITER_MODEL = os.getenv("WRITER_MODEL", "claude-sonnet-5-5")
-EXTRACTOR_MODEL = os.getenv("EXTRACTOR_MODEL", "claude-haiku-4-5")
+WRITER_MODEL = os.getenv("WRITER_MODEL", "anthropic/claude-sonnet-5.5")
+EXTRACTOR_MODEL = os.getenv("EXTRACTOR_MODEL", "anthropic/claude-haiku-4.5")
 CRITIC_MODEL = os.getenv("CRITIC_MODEL", "google/gemini-2.5-flash")
+# Used for non-Claude OpenRouter models (the critic) when no OpenRouter key is set.
+DIRECT_FALLBACK_MODEL = "claude-haiku-4-5"
 
 PRICES = {
     "claude-opus-5-5": ModelPrice(input=4.00, output=20.00, cache_read=0.20, cache_write=5.00),
     "claude-sonnet-5-5": ModelPrice(input=2.00, output=10.00, cache_read=0.20, cache_write=2.50),
     "claude-haiku-4-5": ModelPrice(input=1.00, output=5.00, cache_read=0.10, cache_write=1.25),
+    # Same models through OpenRouter, same list prices. OpenRouter normally reports the exact
+    # cost with each response; these are only used when it doesn't.
+    "anthropic/claude-sonnet-5.5": ModelPrice(input=2.00, output=10.00, cache_read=0.20, cache_write=2.50),
+    "anthropic/claude-haiku-4.5": ModelPrice(input=1.00, output=5.00, cache_read=0.10, cache_write=1.25),
 }
 
 # Models that accept the adaptive-thinking "effort" knob and server-side refusal fallbacks.
-MODELS_WITH_EFFORT = {"claude-opus-5-5", "claude-sonnet-5-5"}
+MODELS_WITH_EFFORT = {"claude-opus-5-5", "claude-sonnet-5-5", "anthropic/claude-opus-5.5", "anthropic/claude-sonnet-5.5"}
 PLANNER_EFFORT = os.getenv("PLANNER_EFFORT", "medium")
 WRITER_EFFORT = os.getenv("WRITER_EFFORT", "medium")
 
