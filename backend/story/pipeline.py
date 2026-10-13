@@ -19,7 +19,11 @@ from story import config, evaluation, llm
 from story.context import build_episode_context
 from story.critic import needs_revision, review_draft, similar_earlier_episodes
 from story.db import session_scope
-from story.memory import commit_memory, extract_memory, forget_episode, refresh_story_so_far, summarise_act
+from story.memory import commit_memory, extract_memory, load_update, refresh_story_so_far, summarise_act
+from story.memory_diff import extract_diff
+from story.versions import (
+    apply_version, ensure_v1, record_written_version, restore_now, save_version, version_with_same_text,
+)
 from story.models import Directive, Episode, Job
 from story.planner import replan_upcoming_beats
 from story.queries import act_for_episode, all_episodes, characters, get_episode, get_story
@@ -79,6 +83,7 @@ def write_episode(story_id: int, number: int) -> None:
         episode.title = draft.title
         episode.text = draft.text
         episode.critic_report = report_dict
+        episode.context_ids = context.ids
         episode.pending_memory = update.model_dump()
         episode.revision_count = len(attempts) - 1
         episode.was_edited_by_human = False
@@ -128,6 +133,7 @@ def build_report(story_id: int, number: int, context, report, attempts: list[dic
         "possible_repeats_of": similar_earlier_episodes(update.summary, context.known_summaries),
         "cost_usd": round(llm.episode_cost(story_id, number), 4),
         "context_sent": context.sections,
+        "context_chars": len(context.text),  # should stay flat as the story grows
     }
 
 
@@ -162,7 +168,10 @@ def approve_episode(story_id: int, number: int) -> None:
         episode = get_episode(session, story_id, number)
         if episode.status != "in_review":
             raise NotAllowed(f"Episode {number} is '{episode.status}', not waiting for review.")
-        commit_memory(session, story_id, number, MemoryUpdate.model_validate(episode.pending_memory))
+        update = load_update(episode.pending_memory)
+        commit_memory(session, story_id, number, update)
+        session.flush()
+        record_written_version(session, story_id, number)
         episode.pending_memory = {}
         episode.status = "approved"
         trace_run_id = episode.critic_report.get("trace_run_id")
@@ -198,19 +207,37 @@ def edit_episode(story_id: int, number: int, new_text: str, new_title: str | Non
         trace_run_id = episode.critic_report.get("trace_run_id")
 
     evaluation.log_human_decision(trace_run_id, "edited", "approved episode rewritten" if was_approved else "draft edited before approval")
+    if was_approved:
+        edit_approved_episode(story_id, number, new_text, new_title)
+        return
 
     update = extract_memory(story_id, number, new_text)
-
     with session_scope() as session:
         episode = get_episode(session, story_id, number)
         episode.text = new_text
         episode.title = new_title or episode.title
         episode.was_edited_by_human = True
-        if not was_approved:
-            episode.pending_memory = update.model_dump()
-            return
-        forget_episode(session, story_id, number)
-        commit_memory(session, story_id, number, update)
+        episode.pending_memory = update.model_dump()
+
+
+def edit_approved_episode(story_id: int, number: int, new_text: str, new_title: str | None) -> None:
+    """Save the edit as a new version and change memory by difference (or restore, for a known text)."""
+    with session_scope() as session:
+        ensure_v1(session, story_id, number)
+        episode = get_episode(session, story_id, number)
+        old_text, title = episode.text, new_title or episode.title
+        same = version_with_same_text(session, story_id, number, new_text)
+        restore_to = same.version if same else None
+
+    diff = None if restore_to else extract_diff(story_id, number, old_text, new_text)
+
+    with session_scope() as session:
+        if restore_to:
+            restore_now(session, story_id, number, restore_to)
+        else:
+            row = save_version(session, story_id, number, title, new_text, "human_edit")
+            apply_version(session, story_id, number, row, diff)
+        get_episode(session, story_id, number).was_edited_by_human = True
         mark_later_drafts_stale(session, story_id, number)
         story = get_story(session, story_id)
         rebuild_recap_through = story.story_so_far_through

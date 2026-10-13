@@ -8,6 +8,7 @@ from story.db import session_scope
 from story.models import Directive, Story
 from story.planner import plan_arc
 from story.queries import acts, all_episodes, characters, facts, find_character, get_episode, get_story
+from story.schemas import CharacterChange
 
 TOTAL = 16
 
@@ -151,6 +152,7 @@ def test_editing_an_approved_episode_rewrites_its_memory(fake_model):
     fake_model.deaths = {2: "Mr Das"}
     write_and_approve(story_id, 3)
     fake_model.deaths = {}  # in the human's rewrite, Mr Das survives
+    fake_model.diffs = {2: {"character_changes": [CharacterChange(name="Mr Das", new_status="alive", reason="lives")]}}
 
     pipeline.edit_episode(story_id, 2, "A rewritten episode two. Mr Das lives.")
 

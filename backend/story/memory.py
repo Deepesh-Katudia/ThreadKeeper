@@ -25,7 +25,7 @@ THREAD_TITLE_MATCH = 0.5
 def extract_memory(story_id: int, number: int, episode_text: str) -> MemoryUpdate:
     with session_scope() as session:
         known_cast = ", ".join(c.name for c in known_by(session, story_id, number)) or "(none)"
-        open_threads = "; ".join(t.title for t in open_threads_at(session, story_id, number)) or "(none)"
+        open_threads = "; ".join(f"[{t.id}] {t.title}" for t in open_threads_at(session, story_id, number)) or "(none)"
     return llm.write_json(
         "extract_memory", prompts.extractor_system(),
         prompts.extractor_prompt(number, episode_text, known_cast, open_threads),
@@ -43,7 +43,12 @@ def open_threads_at(session, story_id: int, number: int) -> list[Thread]:
     return [t for t in threads(session, story_id, ("open",)) if t.opened_episode <= number]
 
 
-def commit_memory(session, story_id: int, number: int, update: MemoryUpdate) -> None:
+def load_update(data: dict) -> MemoryUpdate:
+    """Read a stored MemoryUpdate, including ones saved before resolved_thread_ids existed."""
+    return MemoryUpdate.model_validate({"resolved_thread_ids": [], **data})
+
+
+def commit_memory(session, story_id: int, number: int, update: MemoryUpdate, version: int = 1) -> None:
     """Write an approved episode's memory into the story's records."""
     episode = get_episode(session, story_id, number)
     episode.summary = update.summary
@@ -70,7 +75,10 @@ def commit_memory(session, story_id: int, number: int, update: MemoryUpdate) -> 
             person.status_changed_in = number
 
     for fact in update.new_facts:
-        session.add(Fact(story_id=story_id, subject=fact.subject, statement=fact.statement, source_episode=number))
+        session.add(Fact(
+            story_id=story_id, subject=fact.subject, statement=fact.statement, source_episode=number,
+            source_version=version, is_active=True,
+        ))
 
     record_threads(session, story_id, number, update)
 
@@ -94,11 +102,14 @@ def record_threads(session, story_id: int, number: int, update: MemoryUpdate) ->
             existing.status = "open"
 
     resolvable = [t for t in all_threads if can_resolve_in(t, number)]
-    for title in update.threads_resolved:
-        existing = best_thread_match(resolvable, title)
-        if existing is not None and existing.status != "resolved":
-            existing.status = "resolved"
-            existing.resolved_episode = number
+    by_id = {t.id: t for t in resolvable}
+    answered = [by_id[i] for i in update.resolved_thread_ids if i in by_id]
+    if not answered:  # older extractions only gave titles
+        answered = [t for t in (best_thread_match(resolvable, title) for title in update.threads_resolved) if t]
+    for thread in answered:
+        if thread.status != "resolved":
+            thread.status = "resolved"
+            thread.resolved_episode = number
 
 
 def can_resolve_in(thread: Thread, number: int) -> bool:

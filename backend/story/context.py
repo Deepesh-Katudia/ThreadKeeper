@@ -33,6 +33,8 @@ class EpisodeContext:
     sections: dict[str, str] = field(default_factory=dict)
     earlier_episodes_index: str = ""
     known_summaries: dict[int, str] = field(default_factory=dict)
+    # Which canon rows the writer saw, so an edit can find the episodes that relied on them.
+    ids: dict[str, list[int]] = field(default_factory=dict)
 
     @property
     def text(self) -> str:
@@ -45,6 +47,8 @@ def build_episode_context(session: Session, story_id: int, number: int) -> Episo
     recent = approved_episodes_before(session, story_id, number, config.RECENT_SUMMARIES)
     beats_ahead = episodes_between(session, story_id, number, number + config.UPCOMING_BEATS)
     relevant_people = pick_relevant_characters(cast, recent, beats_ahead)
+    facts_used = select_facts(session, story_id, number, relevant_people, beats_ahead)
+    threads_used = select_threads(session, story_id, number)
 
     context = EpisodeContext(number=number, system=prompts.writer_system(story, describe_main_cast(cast)))
     context.sections = {
@@ -54,9 +58,15 @@ def build_episode_context(session: Session, story_id: int, number: int) -> Episo
         "How the previous episode ended": previous_ending(session, story_id, number),
         "This episode's beat and what comes next": describe_beats(session, story_id, number, beats_ahead),
         "Characters in play": describe_characters(relevant_people, cast),
-        "Canon facts to respect": describe_facts(session, story_id, number, relevant_people, beats_ahead),
-        "Open threads": describe_threads(session, story_id, number),
+        "Canon facts to respect": describe_facts(facts_used),
+        "Open threads": describe_threads(threads_used, number),
         "Standing instructions from the editor": describe_directives(session, story_id, number),
+    }
+    context.ids = {
+        "facts": [f.id for f in facts_used],
+        "threads": [t.id for t in threads_used],
+        "characters": [c.id for c in relevant_people + gone_characters(relevant_people, cast)],
+        "summaries": [e.number for e in recent],
     }
     context.earlier_episodes_index = describe_earlier_episodes(session, story_id, number, len(recent))
     context.known_summaries = {
@@ -138,15 +148,19 @@ def describe_characters(relevant: list[Character], cast: list[Character]) -> str
         f"- {c.name} ({c.role}, {c.status.upper()}, last seen ep {c.last_seen_episode or '-'}): {c.description}"
         for c in relevant
     ]
-    gone = [c for c in cast if c.status in ("dead", "missing") and c not in relevant]
+    gone = gone_characters(relevant, cast)
     if gone:
         lines.append("Also gone from the story: " + ", ".join(f"{c.name} ({c.status} since ep {c.status_changed_in})" for c in gone))
     return "\n".join(lines)
 
 
-def describe_facts(
+def gone_characters(relevant: list[Character], cast: list[Character]) -> list[Character]:
+    return [c for c in cast if c.status in ("dead", "missing") and c not in relevant]
+
+
+def select_facts(
     session: Session, story_id: int, number: int, relevant: list[Character], beats_ahead: list[Episode],
-) -> str:
+) -> list:
     """Every fact from the last few episodes, then facts about who and what is in play, then the newest.
 
     The recent window comes first and survives the cap: a fact from the previous episode matters
@@ -164,7 +178,10 @@ def describe_facts(
     recent = [f for f in all_facts if number - config.RECENT_FACT_EPISODES <= f.source_episode < number]
     matched = [f for f in all_facts if is_relevant(f)]
     newest = all_facts[-10:]
-    chosen = pick_facts(recent, matched + newest, config.MAX_FACTS_IN_CONTEXT)
+    return pick_facts(recent, matched + newest, config.MAX_FACTS_IN_CONTEXT)
+
+
+def describe_facts(chosen: list) -> str:
     if not chosen:
         return "(Nothing established yet.)"
     return "\n".join(f"- (ep {f.source_episode}) {f.subject}: {f.statement}" for f in chosen)
@@ -180,20 +197,30 @@ def pick_facts(recent: list, others: list, limit: int) -> list:
     return sorted(kept.values(), key=lambda f: (f.source_episode, f.id))
 
 
-def describe_threads(session: Session, story_id: int, number: int) -> str:
+def select_threads(session: Session, story_id: int, number: int) -> list:
+    """Open threads, and planned ones due within two episodes, capped."""
+    chosen = [
+        t for t in threads(session, story_id, ("open", "planned"))
+        if (t.status == "open" and t.opened_episode < number)
+        or (t.status == "planned" and number <= t.opened_episode <= number + 2)
+    ]
+    return chosen[: config.MAX_THREADS_IN_CONTEXT]
+
+
+def describe_threads(chosen: list, number: int) -> str:
     lines = []
-    for thread in threads(session, story_id, ("open", "planned")):
-        if thread.status == "planned" and number <= thread.opened_episode <= number + 2:
+    for thread in chosen:
+        if thread.status == "planned":
             lines.append(f"- INTRODUCE SOON (planned for ep {thread.opened_episode}): {thread.title}: {thread.description}")
-        elif thread.status == "open":
-            if thread.payoff_episode and thread.payoff_episode < number:
-                label = f"OVERDUE (was due ep {thread.payoff_episode})"
-            elif thread.payoff_episode and thread.payoff_episode <= number + 3:
-                label = f"DUE SOON (ep {thread.payoff_episode})"
-            else:
-                label = f"open since ep {thread.opened_episode}"
-            lines.append(f"- {label}: {thread.title}: {thread.description}")
-    return "\n".join(lines[: config.MAX_THREADS_IN_CONTEXT]) or "(No open threads.)"
+            continue
+        if thread.payoff_episode and thread.payoff_episode < number:
+            label = f"OVERDUE (was due ep {thread.payoff_episode})"
+        elif thread.payoff_episode and thread.payoff_episode <= number + 3:
+            label = f"DUE SOON (ep {thread.payoff_episode})"
+        else:
+            label = f"open since ep {thread.opened_episode}"
+        lines.append(f"- {label}: {thread.title}: {thread.description}")
+    return "\n".join(lines) or "(No open threads.)"
 
 
 def describe_directives(session: Session, story_id: int, number: int) -> str:

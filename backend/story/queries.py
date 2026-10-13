@@ -1,9 +1,9 @@
 """Small read helpers shared by the planner, writer and memory code."""
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from story.models import Act, Character, Directive, Episode, Fact, Story, Thread
+from story.models import Act, Character, Directive, Episode, EpisodeVersion, Fact, Story, Thread
 
 
 class NotFound(LookupError):
@@ -84,10 +84,46 @@ def find_character(session: Session, story_id: int, name: str) -> Character | No
     return None
 
 
+def is_active_fact():
+    return or_(Fact.is_active.is_(None), Fact.is_active.is_(True))
+
+
 def facts(session: Session, story_id: int) -> list[Fact]:
-    return list(
-        session.scalars(select(Fact).where(Fact.story_id == story_id).order_by(Fact.source_episode))
-    )
+    """Current canon. Retracted facts are left out."""
+    return list(session.scalars(
+        select(Fact).where(Fact.story_id == story_id, is_active_fact()).order_by(Fact.source_episode, Fact.id)
+    ))
+
+
+def facts_including_retracted(session: Session, story_id: int) -> list[Fact]:
+    return list(session.scalars(
+        select(Fact).where(Fact.story_id == story_id).order_by(Fact.source_episode, Fact.id)
+    ))
+
+
+def episode_facts(session: Session, story_id: int, number: int, active_only: bool = True) -> list[Fact]:
+    query = select(Fact).where(Fact.story_id == story_id, Fact.source_episode == number)
+    if active_only:
+        query = query.where(is_active_fact())
+    return list(session.scalars(query.order_by(Fact.id)))
+
+
+def versions_of(session: Session, story_id: int, number: int) -> list[EpisodeVersion]:
+    return list(session.scalars(
+        select(EpisodeVersion)
+        .where(EpisodeVersion.story_id == story_id, EpisodeVersion.episode_number == number)
+        .order_by(EpisodeVersion.version)
+    ))
+
+
+def get_version(session: Session, story_id: int, number: int, version: int) -> EpisodeVersion:
+    row = session.scalar(select(EpisodeVersion).where(
+        EpisodeVersion.story_id == story_id, EpisodeVersion.episode_number == number,
+        EpisodeVersion.version == version,
+    ))
+    if row is None:
+        raise NotFound(f"episode {number} has no version {version}")
+    return row
 
 
 def threads(session: Session, story_id: int, statuses: tuple[str, ...] | None = None) -> list[Thread]:

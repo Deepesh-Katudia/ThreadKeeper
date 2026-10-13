@@ -18,7 +18,7 @@ def thread_named(session, story_id: int, title: str):
 def no_memory(**changes) -> MemoryUpdate:
     fields = dict(
         summary="s", hook="h", characters_present=[], new_characters=[], character_changes=[],
-        new_facts=[], threads_opened=[], threads_resolved=[],
+        new_facts=[], threads_opened=[], threads_resolved=[], resolved_thread_ids=[],
     )
     return MemoryUpdate(**{**fields, **changes})
 

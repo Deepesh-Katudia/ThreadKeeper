@@ -169,7 +169,48 @@ Record:
   them, times and amounts. If the episode opens with a header line (an order, a date, an
   address), record what it says as a fact.
 - threads_opened: new mysteries or promises raised in this episode
-- threads_resolved: titles of open threads (from the list above) this episode answers"""
+- resolved_thread_ids: the [id] of each open thread (from the list above) this episode answers
+- threads_resolved: the titles of those same threads"""
+
+
+def diff_prompt(
+    episode_number: int, old_text: str, new_text: str, fact_lines: str, thread_lines: str, cast_lines: str,
+) -> str:
+    return f"""The editor rewrote episode {episode_number}, which was already part of the story.
+
+Facts currently recorded from this episode:
+{fact_lines}
+
+Threads as of this episode:
+{thread_lines}
+
+Known characters:
+{cast_lines}
+
+Old version:
+<old>
+{old_text}
+</old>
+
+New version:
+<new>
+{new_text}
+</new>
+
+Return only what the edit changes. Keep every fact the new text still supports, even if it is
+worded differently: retract a fact only when the new text no longer says it or says something else.
+- summary, hook, characters_present: for the new version (same rules as a normal extraction)
+- retract_fact_ids: [id]s of recorded facts the new text no longer supports
+- new_facts: facts the new text establishes that no kept fact already covers. Be concrete:
+  addresses, numbers, objects and what is written on them, times, and the opening line.
+- new_characters: people who now appear for the first time; remove_character_ids: [id]s of people
+  first seen in this episode who no longer appear in it
+- character_changes: only where a character's status after this episode differs from what is listed
+- threads_opened: questions the new text raises that aren't listed; remove_thread_ids: [id]s of
+  threads opened in this episode that the new text no longer raises
+- resolve_thread_ids: [id]s of open threads the new text now answers; reopen_thread_ids: [id]s of
+  threads resolved in this episode that the new text no longer answers
+Use empty lists when nothing changed."""
 
 
 def replan_prompt(bible_text: str, feedback: str, after_episode: int, beats_text: str) -> str:

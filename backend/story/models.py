@@ -33,6 +33,8 @@ class Story(Base):
     total_episodes: Mapped[int] = mapped_column(Integer, default=200)
     story_so_far: Mapped[str] = mapped_column(Text, default="")
     story_so_far_through: Mapped[int] = mapped_column(Integer, default=0)
+    # "repair" (NULL) fixes later episodes after an edit; "retcon" leaves published ones as they are.
+    history_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -71,7 +73,34 @@ class Episode(Base):
     human_note: Mapped[str] = mapped_column(Text, default="")
     was_edited_by_human: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str] = mapped_column(Text, default="")
+    # Added after launch, so nullable: NULL means "no versions yet" / "not recorded".
+    current_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Ids of the canon the writer saw: {"facts": [...], "threads": [...], "characters": [...], "summaries": [...]}
+    context_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # The latest ripple that checked this episode: {"ripple_id", "check_status", "decision"}
+    continuity: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class EpisodeVersion(Base):
+    """Every text an approved episode has had, with the memory it produced. Undo restores from here."""
+
+    __tablename__ = "episode_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    story_id: Mapped[int] = mapped_column(Integer, index=True)
+    episode_number: Mapped[int] = mapped_column(Integer, index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(200), default="")
+    text: Mapped[str] = mapped_column(Text, default="")
+    text_hash: Mapped[str] = mapped_column(String(64), default="")
+    # The MemoryUpdate this version produced, plus "fact_ids": the episode's active facts after it.
+    memory: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # written / human_edit / ripple_patch / ripple_rewrite / restore
+    source: Mapped[str] = mapped_column(String(20), default="written")
+    note: Mapped[str] = mapped_column(Text, default="")
+    ripple_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class Character(Base):
@@ -100,6 +129,12 @@ class Fact(Base):
     subject: Mapped[str] = mapped_column(String(120))
     statement: Mapped[str] = mapped_column(Text)
     source_episode: Mapped[int] = mapped_column(Integer, index=True)
+    # Edits retract facts instead of deleting them, so a version can be restored exactly.
+    # NULL is_active means active (rows from before retraction existed).
+    source_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    retracted_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retracted_by_ripple: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Thread(Base):

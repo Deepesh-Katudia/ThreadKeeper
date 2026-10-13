@@ -114,10 +114,14 @@ def write_json(
     story_id: int = 0,
     episode: int = 0,
     max_tokens: int = 16000,
+    temperature: float | None = None,
 ):
-    """Ask a model for JSON that matches `schema` and return the parsed object."""
+    """Ask a model for JSON that matches `schema` and return the parsed object.
+
+    `temperature` is only sent to models without the effort knob (thinking models reject it).
+    """
     return _call(
-        step, system, prompt, model, story_id, episode, max_tokens, schema=schema,
+        step, system, prompt, model, story_id, episode, max_tokens, schema=schema, temperature=temperature,
         langsmith_extra=_trace_labels(step, model, story_id, episode),
     )
 
@@ -152,18 +156,19 @@ def episode_cost(story_id: int, episode: int) -> float:
 
 
 @traceable(run_type="llm", name="llm_call")
-def _call(step, system, prompt, model, story_id, episode, max_tokens, schema):
+def _call(step, system, prompt, model, story_id, episode, max_tokens, schema, temperature=None):
     if is_openrouter_model(model) and not config.OPENROUTER_API_KEY:
         direct = direct_anthropic_model(model)
         log.warning("OPENROUTER_API_KEY missing; %s falls back to %s on the Anthropic API", step, direct)
         model = direct
 
+    extra = {"temperature": temperature} if temperature is not None and model not in config.MODELS_WITH_EFFORT else {}
     started = time.perf_counter()
     try:
         if is_openrouter_model(model):
-            result, usage = _call_openrouter(system, prompt, model, max_tokens, schema)
+            result, usage = _call_openrouter(system, prompt, model, max_tokens, schema, **extra)
         else:
-            result, usage = _call_anthropic(system, prompt, model, max_tokens, schema)
+            result, usage = _call_anthropic(system, prompt, model, max_tokens, schema, **extra)
     except Exception as error:
         _record_call(step, model, story_id, episode, Usage(), started, error=str(error))
         raise LLMError(f"{step} failed on {model}: {error}") from error
@@ -190,11 +195,12 @@ def _attach_usage_to_trace(model: str, usage: Usage) -> None:
     )
 
 
-def _call_anthropic(system, prompt, model, max_tokens, schema):
+def _call_anthropic(system, prompt, model, max_tokens, schema, temperature=None):
     client = anthropic_client()
     request = {
         "model": model,
         "max_tokens": max_tokens,
+        **({"temperature": temperature} if temperature is not None else {}),
         # The system prompt (story bible, style guide) repeats across calls, so cache it.
         "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         "messages": [{"role": "user", "content": prompt}],
@@ -234,10 +240,11 @@ def _call_anthropic(system, prompt, model, max_tokens, schema):
     return text.strip(), usage
 
 
-def _call_openrouter(system, prompt, model, max_tokens, schema):
+def _call_openrouter(system, prompt, model, max_tokens, schema, temperature=None):
     body = {
         "model": model,
         "max_tokens": max_tokens,
+        **({"temperature": temperature} if temperature is not None else {}),
         "messages": [
             {"role": "system", "content": _openrouter_system(system, model)},
             {"role": "user", "content": prompt},

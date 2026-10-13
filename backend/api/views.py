@@ -62,7 +62,11 @@ def character_view(person: Character) -> dict:
 
 
 def fact_view(fact: Fact) -> dict:
-    return {"id": fact.id, "subject": fact.subject, "statement": fact.statement, "source_episode": fact.source_episode}
+    return {
+        "id": fact.id, "subject": fact.subject, "statement": fact.statement, "source_episode": fact.source_episode,
+        "source_version": fact.source_version, "is_active": fact.is_active is not False,
+        "retracted_reason": fact.retracted_reason or "", "retracted_by_ripple": fact.retracted_by_ripple,
+    }
 
 
 def thread_view(thread: Thread) -> dict:

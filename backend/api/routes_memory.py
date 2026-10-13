@@ -11,7 +11,7 @@ from api.views import (
 from story import config
 from story.db import session_scope
 from story.models import Directive, Job, LLMCall
-from story.queries import NotFound, acts, all_episodes, characters, facts, get_story, threads
+from story.queries import NotFound, acts, all_episodes, characters, facts_including_retracted, get_story, threads
 
 router = APIRouter(tags=["memory"])
 
@@ -28,7 +28,7 @@ def memory(story_id: int):
             "story_so_far_through": story.story_so_far_through,
             "acts": [act_view(a) for a in acts(session, story_id)],
             "characters": [character_view(c) for c in characters(session, story_id)],
-            "facts": [fact_view(f) for f in facts(session, story_id)],
+            "facts": [fact_view(f) for f in facts_including_retracted(session, story_id)],
             "threads": [thread_view(t) for t in threads(session, story_id)],
             "directives": [directive_view(d) for d in directives],
         }

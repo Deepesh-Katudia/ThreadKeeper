@@ -115,7 +115,26 @@ class MemoryUpdate(Strict):
     character_changes: list[CharacterChange]
     new_facts: list[NewFact]
     threads_opened: list[ThreadOpened]
+    # Ids are exact; titles are kept as a fallback for data from before thread ids were shown.
+    resolved_thread_ids: list[int]
     threads_resolved: list[str]
+
+
+class MemoryDiff(Strict):
+    """What changed in an edited episode's memory. Everything not listed stays as it is."""
+
+    summary: str
+    hook: str
+    characters_present: list[str]
+    retract_fact_ids: list[int]
+    new_facts: list[NewFact]
+    new_characters: list[NewCharacter]
+    remove_character_ids: list[int]
+    character_changes: list[CharacterChange]
+    threads_opened: list[ThreadOpened]
+    remove_thread_ids: list[int]
+    resolve_thread_ids: list[int]
+    reopen_thread_ids: list[int]
 
 
 class Recap(Strict):

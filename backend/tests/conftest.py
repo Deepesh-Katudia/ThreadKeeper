@@ -14,7 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from story import db, llm  # noqa: E402
 from story.schemas import (  # noqa: E402
     ActBeats, CriticReport, Draft, MemoryUpdate, PlannedAct, PlannedBeat, PlannedCharacter,
-    PlannedThread, Problem, Recap, Replan, StoryBible, NewFact, CharacterChange, ThreadOpened,
+    PlannedThread, Problem, Recap, Replan, StoryBible, NewFact, CharacterChange, ThreadOpened, MemoryDiff,
+    NewCharacter,
 )
 
 
@@ -28,9 +29,14 @@ class FakeModel:
         self.opens: dict[int, list[str]] = {}  # episode number -> thread titles it raises
         self.resolves: dict[int, list[str]] = {}  # episode number -> thread titles it answers
         self.extra_facts: dict[int, list[NewFact]] = {}  # episode number -> more facts it establishes
+        self.newcomers: dict[int, list[str]] = {}  # episode number -> names of people first seen in it
+        # episode number -> MemoryDiff fields (or a function of the prompt) for an edit of that episode
+        self.diffs: dict = {}
+        self.temperatures: list = []
 
-    def __call__(self, system, prompt, model, max_tokens, schema):
+    def __call__(self, system, prompt, model, max_tokens, schema, temperature=None):
         self.prompts.append((schema.__name__ if schema else "text", prompt))
+        self.temperatures.append(temperature)
         answer = getattr(self, f"answer_{schema.__name__}")(prompt)
         return answer, llm.Usage(input_tokens=1000, output_tokens=200)
 
@@ -80,13 +86,26 @@ class FakeModel:
             changes = [CharacterChange(name=self.deaths[number], new_status="dead", reason="fell")]
         return MemoryUpdate(
             summary=f"In episode {number} unique-event-{number} happened to someone new-{number * 7}.",
-            hook=f"hook {number}", characters_present=["Ravi Menon"], new_characters=[],
+            hook=f"hook {number}", characters_present=["Ravi Menon", *self.newcomers.get(number, [])],
+            new_characters=[NewCharacter(name=n, role="minor", description="one-off") for n in self.newcomers.get(number, [])],
             character_changes=changes,
             new_facts=[NewFact(subject="Ravi Menon", statement=f"fact from episode {number}")]
             + self.extra_facts.get(number, []),
             threads_opened=[ThreadOpened(title=t, description="?") for t in self.opens.get(number, [])],
-            threads_resolved=list(self.resolves.get(number, [])),
+            resolved_thread_ids=[], threads_resolved=list(self.resolves.get(number, [])),
         )
+
+    def answer_MemoryDiff(self, prompt):
+        number = int(re.search(r"rewrote episode (\d+)", prompt).group(1))
+        overrides = self.diffs.get(number, {})
+        if callable(overrides):
+            overrides = overrides(prompt)
+        return MemoryDiff(**{
+            "summary": f"Edited episode {number}.", "hook": f"hook {number}", "characters_present": ["Ravi Menon"],
+            "retract_fact_ids": [], "new_facts": [], "new_characters": [], "remove_character_ids": [],
+            "character_changes": [], "threads_opened": [], "remove_thread_ids": [], "resolve_thread_ids": [],
+            "reopen_thread_ids": [], **overrides,
+        })
 
     def answer_Recap(self, prompt):
         return Recap(text="Recap of everything so far.")
