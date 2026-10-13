@@ -11,10 +11,11 @@ Layered memory, each layer with a fixed budget, so episode 150's prompt is the s
 
 - **Arc position:** act goal and turning point, the previous beat, this beat, the next 3 beats.
 - **Rolling recap:** ≤350 words, refreshed every 10 episodes. Act summaries are stored at act ends.
-- **Recent episodes:** the last 8 summaries and hooks, plus the final 150 words of the previous episode.
+- **Recent episodes:** the last 8 summaries and hooks, plus the previous episode's opening line and final 150 words.
 - **Characters and facts:** retrieved, not dumped. That means the main cast, anyone seen in the last
   3 episodes or named in upcoming beats, plus a list of the dead and missing. Facts about those
-  entities are capped at 40. Each fact records the episode it came from.
+  entities are capped at 40, with every fact from the last 3 episodes always kept. Each fact records
+  the episode and version it came from, and each episode records the ids of the canon its writer saw.
 - **Open threads:** sorted by urgency (due soon, overdue, to be introduced).
 - **Standing instructions:** every active piece of human feedback.
 
@@ -30,8 +31,14 @@ writer saw for every episode.
   unwritten beats, so it reaches future episodes by two routes. In the demo, "kill off Harlan"
   rewrote 6 upcoming beats. The planner also noticed Harlan was already dead in canon and staged
   his death on-page instead ([`docs/demo/interventions.md`](docs/demo/interventions.md)).
-- **Editing history:** editing an approved episode deletes the memory it produced, re-extracts
-  from the new text, and marks later unapproved drafts stale.
+- **Editing history (ripple review):** an edit to an approved episode becomes a new *version* and a
+  tracked ripple with three gates. (1) The human confirms or trims the memory diff before canon
+  changes; facts are retracted, never deleted, so restoring a version is exact and needs no model.
+  (2) The next 20 episodes are checked cheapest-first: code signals (recorded context ids, text
+  matches, the next episode), then a critic call with verifiable quotes, then a smallest-patch
+  proposal. The human accepts, edits, keeps or rewrites each in order; an accepted fix re-checks
+  later ones. (3) New beats are proposed and applied only on approval. Writing waits meanwhile,
+  and each ripple stops at a $0.50 cap.
 
 ## 3. How do we catch inconsistency or repetition before a human does?
 
@@ -48,8 +55,8 @@ batch auto-approve. LangSmith experiments score hook, consistency, directives an
    grows without limit. *Fix:* embeddings, and consolidating facts that supersede each other.
 2. **The critic's episode index grows linearly.** *Fix:* retrieve the top-k similar summaries instead.
 3. **Recap drift:** summaries of summaries lose detail. *Fix:* also feed the current act summary.
-4. **Rewriting episode 40 at episode 150** repairs memory but not the prose of episodes 41–150.
-   *Fix:* use fact provenance to find the episodes that relied on changed facts, and queue
-   human-approved continuity patches.
+4. **Ripples only look 20 episodes ahead**, and an episode with no recorded context is matched by
+   text alone, so a paraphrased dependency can slip through. *Fix:* embed facts and episodes and
+   check by similarity. A rewritten episode is drafted from canon, not from its later neighbours.
 5. **The critic is stricter than the reader:** 7 revisions in 4 episodes doubled the cost. *Fix:*
    calibrate it against the logged human decisions.

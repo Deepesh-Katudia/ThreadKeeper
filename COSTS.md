@@ -20,6 +20,22 @@ Full breakdown: [`docs/demo/run-stats.md`](docs/demo/run-stats.md).
 Revisions drive the spread: episode 1 passed first time ($0.03), episodes 2 and 3 needed two
 revisions each ($0.09 and $0.13).
 
+## Editing history: the cost of a ripple
+
+Editing an approved episode costs one memory diff (Haiku), one `ripple_check` (Gemini Flash) per
+*suspicious* later episode, one `ripple_patch` (Sonnet) per conflict found, one more diff per
+accepted fix, a recap rebuild (Haiku) and one re-plan (Opus). Episodes with no signal cost nothing.
+
+    ripple cost = diff + (flagged × check) + (conflicts × patch) + (accepted × diff) + recap + replan
+
+The test ripple (edit episode 5, episode 6 flagged and patched, episodes 7–8 cleared for free)
+makes 7 calls. With the fake model's fixed 1,000 tokens in and 200 out per call, that gives
+2 Haiku diffs ($0.002 each), 1 Sonnet patch ($0.004), Haiku recap and act summary ($0.002 each),
+and 1 Opus re-plan ($0.008), for **$0.020** in total. The Gemini check is $0.0008 at list price.
+At real prompt sizes (about 3k tokens in per diff and patch, and the $0.11 re-plan measured above)
+a typical ripple comes to an **estimated $0.13–0.18**, mostly the re-plan. That is not yet measured
+on a live edit. `RIPPLE_COST_CAP_USD` (default $0.50) caps every ripple.
+
 ## Estimate for all 200 episodes
 
 | | Cost | Model time |

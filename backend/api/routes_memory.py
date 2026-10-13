@@ -10,6 +10,7 @@ from api.views import (
 )
 from story import config
 from story.db import session_scope
+from story.integrity import check_memory
 from story.models import Directive, Job, LLMCall
 from story.queries import NotFound, acts, all_episodes, characters, facts_including_retracted, get_story, threads
 
@@ -32,6 +33,12 @@ def memory(story_id: int):
             "threads": [thread_view(t) for t in threads(session, story_id)],
             "directives": [directive_view(d) for d in directives],
         }
+
+
+@router.get("/stories/{story_id}/memory/check")
+def memory_check(story_id: int):
+    """Bookkeeping rules memory must satisfy (story/integrity.py). An empty list means all is well."""
+    return {"problems": check_memory(story_id)}
 
 
 @router.get("/stories/{story_id}/costs")

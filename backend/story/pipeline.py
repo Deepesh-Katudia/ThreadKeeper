@@ -21,7 +21,7 @@ from story.critic import needs_revision, review_draft, similar_earlier_episodes
 from story.db import session_scope
 from story.errors import NotAllowed
 from story.memory import commit_memory, extract_memory, load_update, refresh_story_so_far, summarise_act
-from story.ripple import block_if_open, start_ripple
+from story.ripple import block_if_open, recover_interrupted_scans, start_ripple
 from story.versions import record_written_version
 from story.models import Directive, Episode, Job
 from story.planner import replan_upcoming_beats
@@ -281,3 +281,4 @@ def recover_interrupted_work() -> None:
             episode.status, episode.error = "failed", "Interrupted by a server restart. Write it again."
         for job in session.scalars(select(Job).where(Job.status == "running")):
             job.status, job.detail = "failed", "Interrupted by a server restart."
+    recover_interrupted_scans()

@@ -16,6 +16,7 @@ human gates:
 While a ripple is open, writing and other edits wait, the same way they wait for a draft in review.
 """
 
+import logging
 from datetime import datetime, timezone
 
 from langsmith import traceable
@@ -24,6 +25,7 @@ from sqlalchemy import select
 from story import config, evaluation
 from story.db import session_scope
 from story.errors import NotAllowed
+from story.integrity import check_memory
 from story.memory import refresh_story_so_far, summarise_act
 from story.memory_diff import extract_diff, validate_diff
 from story.models import EpisodeVersion, Ripple, RippleItem
@@ -35,6 +37,8 @@ from story.ripple_scan import (
 )
 from story.schemas import MemoryDiff
 from story.versions import apply_version, ensure_v1, restore_diff, save_version, text_hash, version_with_same_text
+
+log = logging.getLogger(__name__)
 
 OPEN = ("confirm_memory", "scanning", "reviewing", "replan_review")
 DECISIONS = ("accept", "edit", "keep", "rewrite")
@@ -194,10 +198,31 @@ def scan(story_id: int, ripple_id: int) -> str:
         ripple = get_ripple(session, story_id, ripple_id, "scanning")
         numbers = [i.episode_number for i in items_of(session, ripple_id)]
         change, source = ripple.memory_diff["change"], ripple.source_episode
-    check_items(story_id, ripple_id, numbers, change, source, recheck=False)
+    try:
+        check_items(story_id, ripple_id, numbers, change, source, recheck=False)
+    except Exception as error:  # never leave the story blocked behind a scan that died
+        stop_scanning(story_id, ripple_id, f"Checking stopped early ({str(error)[:200]}).")
+        raise
     with session_scope() as session:
         get_ripple(session, story_id, ripple_id).status = "reviewing"
     return finish_if_decided(story_id, ripple_id) or progress_message(story_id, ripple_id)
+
+
+def stop_scanning(story_id: int, ripple_id: int, reason: str) -> None:
+    """Hand an interrupted scan to the human: unchecked episodes stay pending and can still be decided."""
+    with session_scope() as session:
+        ripple = get_ripple(session, story_id, ripple_id)
+        if ripple.status == "scanning":
+            ripple.status = "reviewing"
+            ripple.summary = f"{reason} Unchecked episodes are marked pending."
+
+
+def recover_interrupted_scans() -> None:
+    """After a restart, a scan that was running is handed over for review instead of blocking forever."""
+    with session_scope() as session:
+        stuck = [(r.story_id, r.id) for r in session.scalars(select(Ripple).where(Ripple.status == "scanning"))]
+    for story_id, ripple_id in stuck:
+        stop_scanning(story_id, ripple_id, "Checking was interrupted by a server restart.")
 
 
 def check_items(story_id: int, ripple_id: int, numbers: list[int], change: dict, source: int, recheck: bool) -> None:
@@ -448,6 +473,17 @@ def approve_replan(story_id: int, ripple_id: int, keep_episode_numbers: list[int
         ripple.cost_usd = ripple_cost(session, ripple)
         trace = trace_of(session, story_id, ripple.source_episode)
     evaluation.log_human_decision(trace, "ripple_closed", f"applied {len(chosen)} beat changes")
+
+    try:
+        problems = check_memory(story_id)
+    except Exception:  # the check is advisory; the ripple is already closed and must stay closed
+        log.exception("Memory check after ripple %s failed", ripple_id)
+        return
+    if problems:
+        with session_scope() as session:
+            ripple = get_ripple(session, story_id, ripple_id)
+            ripple.replan = {**ripple.replan, "integrity": problems}
+            ripple.summary += f" Memory check: {len(problems)} problem(s), see the Memory page."
 
 
 def closing_summary(items: list[RippleItem], applied: list[dict]) -> str:

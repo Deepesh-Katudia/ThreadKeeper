@@ -194,7 +194,7 @@ function EpisodesGate({ storyId, ripple, locked, run }: { storyId: number; rippl
 
 const CHECK_LABELS: Record<string, string> = {
   major: "🔴 needs review", recheck: "🔴 re-check after an earlier fix", minor: "🟡 minor · fix suggested",
-  pending: "⏳ not checked (cost cap)", unaffected: "🟢 unaffected",
+  pending: "⏳ not checked (cost cap or interrupted)", unaffected: "🟢 unaffected",
 };
 
 function ItemCard({ storyId, rippleId, item, isNext, locked, run }: {

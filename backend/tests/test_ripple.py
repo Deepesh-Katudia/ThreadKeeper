@@ -13,7 +13,8 @@ from sqlalchemy import delete
 
 from story import config, pipeline, ripple
 from story.db import session_scope
-from story.models import EpisodeVersion
+from story.integrity import check_memory
+from story.models import EpisodeVersion, Fact, Thread
 from story.queries import facts, facts_including_retracted, get_episode, get_story, threads, versions_of
 from story.schemas import NewFact
 from tests.ripple_helpers import close, edit_and_confirm
@@ -283,3 +284,63 @@ def test_the_ripple_api_walks_through_all_three_gates(fake_model, monkeypatch):
     assert any(not f["is_active"] and f["retracted_reason"] for f in memory["facts"])
     with session_scope() as session:
         assert any(f.is_active is False for f in facts_including_retracted(session, story_id))
+
+
+def test_restoring_version_one_through_a_ripple_needs_no_extractor(fake_model, monkeypatch):
+    story_id = locker_story(fake_model, monkeypatch)
+    before = canon(story_id)
+    close(story_id, edit_and_confirm(story_id, 5, EDIT))
+    extractions = len(fake_model.prompts_for("MemoryDiff")) + len(fake_model.prompts_for("MemoryUpdate"))
+
+    ripple_id = ripple.start_restore(story_id, 5, 1)
+    ripple.confirm_memory(story_id, ripple_id)
+    ripple.scan(story_id, ripple_id)
+    close(story_id, ripple_id)
+
+    assert canon(story_id) == before
+    assert len(fake_model.prompts_for("MemoryDiff")) + len(fake_model.prompts_for("MemoryUpdate")) == extractions
+    with pytest.raises(pipeline.NotAllowed, match="already the current one"):
+        ripple.start_restore(story_id, 5, 1)
+
+
+def test_memory_check_is_clean_after_a_full_ripple(fake_model, monkeypatch):
+    story_id = locker_story(fake_model, monkeypatch)
+    close(story_id, edit_and_confirm(story_id, 5, EDIT), decision="accept")
+
+    assert check_memory(story_id) == []
+
+
+def test_memory_check_reports_broken_bookkeeping(fake_model, monkeypatch):
+    story_id = locker_story(fake_model, monkeypatch)
+    with session_scope() as session:
+        thread = Thread(story_id=story_id, title="Who rang", opened_episode=6, resolved_episode=4, status="resolved")
+        session.add(thread)
+        session.add(Fact(story_id=story_id, subject="x", statement="sneaked in", source_episode=3, is_active=True))
+        later_fact = facts(session, story_id)[-1].id
+        get_episode(session, story_id, 2).context_ids = {"facts": [later_fact], "summaries": [1]}
+        get_episode(session, story_id, 7).current_version = None
+        session.add(ripple.Ripple(story_id=story_id, source_episode=1, status="closed"))
+        session.flush()
+        closed_id = session.query(ripple.Ripple).order_by(ripple.Ripple.id.desc()).first().id
+        session.add(ripple.RippleItem(ripple_id=closed_id, episode_number=2, check_status="major"))
+
+    problems = check_memory(story_id)
+
+    assert any("Who rang" in p and "before it opens" in p for p in problems)
+    assert any(p.startswith("Episode 3: active facts don't match") for p in problems)
+    assert any(p.startswith("Episode 2's writer was shown canon from episode 2 or later") for p in problems)
+    assert any("still undecided" in p for p in problems)
+    assert "Episode 7 is approved but has no current version." in problems
+
+
+def test_a_scan_interrupted_by_a_restart_is_handed_to_the_human(fake_model, monkeypatch):
+    story_id = locker_story(fake_model, monkeypatch)
+    ripple_id = pipeline.edit_episode(story_id, 5, EDIT)
+    ripple.confirm_memory(story_id, ripple_id)  # the server dies before the scan job runs
+
+    pipeline.recover_interrupted_work()
+
+    status, items = ripple_state(ripple_id)
+    assert status == "reviewing" and items[6].check_status == "pending"
+    close(story_id, ripple_id)  # pending episodes can still be decided, so the story isn't stuck
+    assert pipeline.next_episode_to_write(story_id) == 9

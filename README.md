@@ -46,7 +46,9 @@ premise → [plan bible: cast, 8 acts, threads] → [plan 200 beats, one act per
              → draft (Sonnet) → critic (other model family) → revise, at most 2 times, under a $ cap
              → extract memory (summary, facts, deaths, threads)
              → HUMAN approves / edits / rejects with a note / gives story-wide feedback
-             → approved memory becomes canon; recap refreshed every 10 episodes
+             → approved memory becomes canon (version 1); recap refreshed every 10 episodes
+        → HUMAN edits an approved episode → ripple review: confirm memory diff → check later
+             episodes (code, then critic, then patch) → decide each → approve new beats
 ```
 
 Every step, retry, token count, cost and latency is written to the `llm_calls` table (shown on
@@ -81,14 +83,41 @@ Without `OPENROUTER_API_KEY`, the critic falls back to Claude Haiku and logs a w
 3. **Episodes**: press *Write episode N*. Each draft arrives with the critic's report, the memory
    it would add, and the exact context the writer saw. Then:
    - **Approve**: its facts, deaths and threads become canon.
-   - **Edit text**: works on approved episodes too. The episode's memory is re-extracted and
-     later drafts are marked stale.
+   - **Edit text**: on a draft, its memory is re-extracted. On an approved episode it starts a
+     ripple review (below).
    - **Reject…**: add a note; it is rewritten with that note.
    - **Steer the rest of the story**: feedback becomes a standing instruction in every future
      prompt, and the next 20 unwritten beats are re-planned around it.
    - **Batch + auto-approve**: writes several episodes and stops at the first one the critic flags.
 4. **Resume**: close everything and come back later. State lives in the database, so writing
    continues at the first unapproved episode.
+
+## Editing history (ripple review)
+
+Editing an approved episode never changes canon straight away. It starts a **ripple**:
+
+1. **Confirm memory.** The edit is saved as a new version, and you see the memory diff: facts
+   retracted (struck through), facts added, characters and threads changed. Remove anything wrong,
+   then confirm, or cancel and nothing changes.
+2. **Review later episodes.** The next `RIPPLE_WINDOW` approved episodes are checked. Episodes with
+   no sign of the change (their writer never saw the changed canon, and their text doesn't mention
+   it) are cleared for free. The rest get a critic check that quotes the conflicting passage, and a
+   proposed minimal patch. For each one, in order: **Accept fix**, **Edit myself**, **Keep as is**,
+   or **Rewrite**. An accepted fix that changes canon re-checks the episodes after it.
+3. **Approve new beats.** Recaps are rebuilt and the planner proposes upcoming beats that follow
+   from the change. Tick the ones to keep.
+
+While a ripple is open, writing and other edits are paused. Every episode keeps its versions:
+compare any two, or restore one (a restore is a ripple too, with its memory rebuilt exactly and no
+model call). The **History** tab lists every ripple, and the **Memory** tab shows retracted facts
+and runs a memory check. Set a story's `history_mode` to `retcon` for episodes already published to
+readers: later episodes are still checked and flagged, but kept as they are.
+
+| Env var | Default | What it does |
+|---|---|---|
+| `RIPPLE_WINDOW` | 20 | How many later episodes an edit checks |
+| `RIPPLE_COST_CAP_USD` | 0.50 | Spending limit per ripple; unchecked episodes stay *pending* |
+| `RECENT_FACT_EPISODES` | 3 | Facts from this many previous episodes always reach the writer |
 
 ## Tracing and evaluation (LangSmith)
 
