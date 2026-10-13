@@ -1,6 +1,8 @@
 """Turns database rows into plain dicts for JSON responses."""
 
-from story.models import Act, Character, Directive, Episode, Fact, Job, LLMCall, Story, Thread
+from story.models import (
+    Act, Character, Directive, Episode, EpisodeVersion, Fact, Job, LLMCall, Ripple, RippleItem, Story, Thread,
+)
 
 
 def story_view(story: Story) -> dict:
@@ -12,6 +14,7 @@ def story_view(story: Story) -> dict:
         "setting": story.setting,
         "style_guide": story.style_guide,
         "status": story.status,
+        "history_mode": story.history_mode or "repair",
         "total_episodes": story.total_episodes,
         "story_so_far": story.story_so_far,
         "story_so_far_through": story.story_so_far_through,
@@ -33,6 +36,8 @@ def episode_brief(episode: Episode) -> dict:
         "status": episode.status, "title": episode.title,
         "passed_critic": episode.critic_report.get("passed") if episode.critic_report else None,
         "was_edited_by_human": episode.was_edited_by_human,
+        "current_version": episode.current_version,
+        "continuity": episode.continuity,
     }
 
 
@@ -103,3 +108,57 @@ def call_view(call: LLMCall) -> dict:
         "latency_ms": call.latency_ms, "succeeded": call.succeeded, "error": call.error,
         "created_at": call.created_at.isoformat() if call.created_at else None,
     }
+
+
+def version_view(row: EpisodeVersion, current: int | None) -> dict:
+    return {
+        "version": row.version, "title": row.title, "text": row.text, "source": row.source, "note": row.note,
+        "ripple_id": row.ripple_id, "is_current": row.version == current, "is_pending": row.memory is None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def ripple_item_view(item: RippleItem) -> dict:
+    return {
+        "episode_number": item.episode_number, "check_status": item.check_status,
+        "signals": item.signals or {"reasons": [], "verdict": None}, "conflicts": item.conflicts or [],
+        "proposal": item.proposal, "decision": item.decision, "decision_note": item.decision_note,
+        "resulting_version": item.resulting_version,
+        "decided_at": item.decided_at.isoformat() if item.decided_at else None,
+    }
+
+
+def ripple_view(ripple: Ripple, items: list[RippleItem]) -> dict:
+    record = ripple.memory_diff or {}
+    return {
+        "id": ripple.id, "source_episode": ripple.source_episode,
+        "from_version": ripple.from_version, "to_version": ripple.to_version,
+        "status": ripple.status, "is_restore": bool(record.get("restore_version")),
+        "diff": record.get("diff"), "change": record.get("change"),
+        "replan": ripple.replan, "summary": ripple.summary, "cost_usd": round(ripple.cost_usd or 0.0, 4),
+        "items": [ripple_item_view(i) for i in items], "counts": item_counts(items),
+        "created_at": ripple.created_at.isoformat() if ripple.created_at else None,
+        "closed_at": ripple.closed_at.isoformat() if ripple.closed_at else None,
+    }
+
+
+def ripple_brief(ripple: Ripple | None, items: list[RippleItem]) -> dict | None:
+    if ripple is None:
+        return None
+    return {
+        "id": ripple.id, "status": ripple.status, "source_episode": ripple.source_episode,
+        "from_version": ripple.from_version, "to_version": ripple.to_version,
+        "counts": item_counts(items), "summary": ripple.summary,
+    }
+
+
+def item_counts(items: list[RippleItem]) -> dict:
+    """How many later episodes are in each state; "waiting" means a human decision is needed."""
+    counts = {"pending": 0, "unaffected": 0, "minor": 0, "major": 0, "recheck": 0, "decided": 0, "waiting": 0}
+    for item in items:
+        counts[item.check_status] = counts.get(item.check_status, 0) + 1
+        if item.decision:
+            counts["decided"] += 1
+        elif item.check_status != "unaffected":
+            counts["waiting"] += 1
+    return counts

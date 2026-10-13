@@ -4,10 +4,10 @@ from fastapi import APIRouter, BackgroundTasks
 
 from api.jobs import start_job
 from api.schemas import EpisodeEdit, Feedback, Rejection, WriteRequest
-from api.views import episode_full, job_view
-from story import pipeline
+from api.views import episode_full, job_view, ripple_view, version_view
+from story import pipeline, ripple
 from story.db import session_scope
-from story.queries import get_episode
+from story.queries import get_episode, versions_of
 
 router = APIRouter(prefix="/stories/{story_id}", tags=["episodes"])
 
@@ -35,9 +35,29 @@ def approve(story_id: int, number: int):
 
 @router.put("/episodes/{number}")
 def edit(story_id: int, number: int, body: EpisodeEdit):
-    pipeline.edit_episode(story_id, number, body.text, body.title)
+    """Editing a draft returns the episode. Editing an approved one also returns the ripple it started."""
+    ripple_id = pipeline.edit_episode(story_id, number, body.text, body.title)
     with session_scope() as session:
-        return episode_full(get_episode(session, story_id, number))
+        episode = episode_full(get_episode(session, story_id, number))
+        if ripple_id is None:
+            return {"episode": episode, "ripple": None}
+        found = ripple.get_ripple(session, story_id, ripple_id)
+        return {"episode": episode, "ripple": ripple_view(found, ripple.items_of(session, ripple_id))}
+
+
+@router.get("/episodes/{number}/versions")
+def list_versions(story_id: int, number: int):
+    with session_scope() as session:
+        episode = get_episode(session, story_id, number)
+        return [version_view(v, episode.current_version) for v in versions_of(session, story_id, number)]
+
+
+@router.post("/episodes/{number}/versions/{version}/restore")
+def restore(story_id: int, number: int, version: int):
+    """Restoring starts a ripple too, but its memory diff is worked out in code, not by a model."""
+    ripple_id = ripple.start_restore(story_id, number, version)
+    with session_scope() as session:
+        return ripple_view(ripple.get_ripple(session, story_id, ripple_id), ripple.items_of(session, ripple_id))
 
 
 @router.post("/episodes/{number}/reject")

@@ -44,3 +44,19 @@ class Rejection(BaseModel):
 class Feedback(BaseModel):
     text: str = Field(min_length=3, max_length=2000)
     expires_after_episode: int = Field(default=0, ge=0)
+
+
+class MemoryConfirm(BaseModel):
+    # The memory diff as the human trimmed it; None confirms it as proposed.
+    diff: dict | None = None
+
+
+class RippleDecision(BaseModel):
+    decision: str = Field(pattern="^(accept|edit|keep|rewrite)$")
+    text: str | None = Field(default=None, max_length=20000)
+    note: str = Field(default="", max_length=2000)
+
+
+class ReplanApproval(BaseModel):
+    # Episode numbers whose new beat to keep; None keeps every proposed change.
+    episodes: list[int] | None = None

@@ -144,6 +144,13 @@ def replan_upcoming_beats(story_id: int, feedback: str, after_episode: int) -> t
 
     Returns the planner's summary and every beat that changed, before and after.
     """
+    what_changed, changes = propose_replan(story_id, feedback, after_episode)
+    apply_replan(story_id, changes)
+    return what_changed, changes
+
+
+def propose_replan(story_id: int, feedback: str, after_episode: int, step: str = "replan_beats") -> tuple[str, list[dict]]:
+    """Ask the planner how the upcoming beats should change, without changing them yet."""
     with session_scope() as session:
         upcoming = [
             e for e in episodes_between(session, story_id, after_episode + 1, after_episode + REPLAN_WINDOW)
@@ -156,21 +163,23 @@ def replan_upcoming_beats(story_id: int, feedback: str, after_episode: int) -> t
         old_beats = {e.number: e.beat for e in upcoming}
 
     result = llm.write_json(
-        "replan_beats", prompts.planner_system(),
+        step, prompts.planner_system(),
         prompts.replan_prompt(bible_text, feedback, after_episode, beats_text),
         Replan, config.PLANNER_MODEL, story_id=story_id,
     )
-
     changes = [
         {"episode": b.episode, "before": old_beats[b.episode], "after": b.beat.strip()}
         for b in result.beats
         if b.episode in old_beats and b.beat.strip() != old_beats[b.episode]
     ]
+    return result.what_changed, changes
+
+
+def apply_replan(story_id: int, changes: list[dict]) -> None:
     with session_scope() as session:
         for change in changes:
-            episode = next(e for e in episodes_between(session, story_id, change["episode"], change["episode"]))
-            episode.beat = change["after"]
-    return result.what_changed, changes
+            for episode in episodes_between(session, story_id, change["episode"], change["episode"]):
+                episode.beat = change["after"]
 
 
 def reset_plan(story_id: int) -> None:

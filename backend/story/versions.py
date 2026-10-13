@@ -17,7 +17,7 @@ from story.memory import best_thread_match, load_update
 from story.memory_diff import apply_diff, is_invented_by, validate_diff
 from story.models import EpisodeVersion
 from story.queries import (
-    characters, episode_facts, find_character, get_episode, get_version, threads, versions_of,
+    characters, episode_facts, find_character, get_episode, threads, versions_of,
 )
 from story.schemas import CharacterChange, MemoryDiff, MemoryUpdate, NewCharacter, NewFact, ThreadOpened
 
@@ -188,11 +188,3 @@ def apply_version(
     episode.text, episode.title, episode.current_version = row.text, row.title or episode.title, row.version
     if row.memory is None or "fact_ids" not in row.memory:
         row.memory = memory_record(session, story_id, number)
-
-
-def restore_now(session, story_id: int, number: int, version: int, ripple_id: int | None = None) -> None:
-    """Restore a version immediately. No model call, so the same version always gives the same canon."""
-    ensure_v1(session, story_id, number)
-    target = get_version(session, story_id, number, version)
-    diff, reactivate = restore_diff(session, story_id, number, target)
-    apply_version(session, story_id, number, target, diff, reactivate, ripple_id)

@@ -36,7 +36,9 @@ def rule_problems(draft: Draft, cast: list[Character]) -> list[Problem]:
 
 
 @traceable(name="review_draft")
-def review_draft(story_id: int, context: EpisodeContext, draft: Draft, cast: list[Character]) -> CriticReport:
+def review_draft(
+    story_id: int, context: EpisodeContext, draft: Draft, cast: list[Character], step_prefix: str = "",
+) -> CriticReport:
     rules = rule_problems(draft, cast)
     critic_context = context.text
     if context.earlier_episodes_index:
@@ -45,7 +47,7 @@ def review_draft(story_id: int, context: EpisodeContext, draft: Draft, cast: lis
         critic_context += "\n\n## Automatic checks flagged\n" + "\n".join(f"- {p.detail}" for p in rules)
 
     report = llm.write_json(
-        "critic", prompts.critic_system(),
+        f"{step_prefix}critic", prompts.critic_system(),
         prompts.critic_prompt(critic_context, draft.text, count_words(draft.text)),
         CriticReport, config.CRITIC_MODEL, story_id=story_id, episode=context.number,
         max_tokens=4000,

@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api import routes_episodes, routes_evaluations, routes_memory, routes_stories
+from api import routes_episodes, routes_evaluations, routes_memory, routes_ripples, routes_stories
 from api.errors import readable_validation_message
 from api.jobs import JobAlreadyRunning
 from story import config
@@ -46,6 +46,7 @@ app.include_router(routes_stories.router, dependencies=protected)
 app.include_router(routes_episodes.router, dependencies=protected)
 app.include_router(routes_memory.router, dependencies=protected)
 app.include_router(routes_evaluations.router, dependencies=protected)
+app.include_router(routes_ripples.router, dependencies=protected)
 
 
 @app.get("/health")

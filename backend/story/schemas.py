@@ -139,3 +139,26 @@ class MemoryDiff(Strict):
 
 class Recap(Strict):
     text: str
+
+
+# --- Ripple review: checking later episodes after an edit ------------------------
+
+
+class Conflict(Strict):
+    quote: str  # copied exactly from the episode text
+    reason: str
+
+
+class ContinuityCheck(Strict):
+    verdict: str  # consistent / minor / major
+    conflicts: list[Conflict]
+
+
+class PatchEdit(Strict):
+    find: str  # an exact passage of the episode, ideally one sentence
+    replace: str
+
+
+class Patch(Strict):
+    edits: list[PatchEdit]
+    note: str

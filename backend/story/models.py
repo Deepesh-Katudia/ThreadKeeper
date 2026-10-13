@@ -222,3 +222,49 @@ class Job(Base):
     detail: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class Ripple(Base):
+    """A tracked change request: an approved episode was edited, and later episodes must be checked.
+
+    confirm_memory -> scanning -> reviewing -> replan_review -> closed   (or cancelled)
+    """
+
+    __tablename__ = "ripples"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    story_id: Mapped[int] = mapped_column(Integer, index=True)
+    source_episode: Mapped[int] = mapped_column(Integer)
+    from_version: Mapped[int] = mapped_column(Integer, default=1)
+    to_version: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(20), default="confirm_memory")
+    # The MemoryDiff, plus "change" (the same thing in readable lines) and restore details.
+    memory_diff: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # {"what_changed": "...", "changes": [{"episode", "before", "after"}], "applied": [7, 9]}
+    replan: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RippleItem(Base):
+    """One later episode inside a ripple's window, and what happened to it."""
+
+    __tablename__ = "ripple_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ripple_id: Mapped[int] = mapped_column(Integer, index=True)
+    episode_number: Mapped[int] = mapped_column(Integer)
+    # pending / unaffected / minor / major / recheck
+    check_status: Mapped[str] = mapped_column(String(20), default="pending")
+    # {"reasons": ["used retracted fact #12", ...], "verdict": "minor"}
+    signals: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    conflicts: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # {"kind": "patch" | "rewrite", "edits": [{"find", "replace"}], "text": "...", "title": "...", "note": "..."}
+    proposal: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # accept / edit / keep / rewrite
+    decision: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    decision_note: Mapped[str] = mapped_column(Text, default="")
+    resulting_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

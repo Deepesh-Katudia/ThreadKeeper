@@ -8,18 +8,20 @@ from story.schemas import CriticReport, Draft
 
 
 @traceable(name="draft_episode")
-def draft_episode(story_id: int, context: EpisodeContext, editor_note: str = "") -> Draft:
+def draft_episode(story_id: int, context: EpisodeContext, editor_note: str = "", step_prefix: str = "") -> Draft:
     return llm.write_json(
-        "draft", context.system,
+        f"{step_prefix}draft", context.system,
         prompts.draft_prompt(context.text, context.number, editor_note),
         Draft, config.WRITER_MODEL, story_id=story_id, episode=context.number,
     )
 
 
 @traceable(name="revise_episode")
-def revise_episode(story_id: int, context: EpisodeContext, draft: Draft, report: CriticReport) -> Draft:
+def revise_episode(
+    story_id: int, context: EpisodeContext, draft: Draft, report: CriticReport, step_prefix: str = "",
+) -> Draft:
     return llm.write_json(
-        "revise", context.system,
+        f"{step_prefix}revise", context.system,
         prompts.revise_prompt(context.text, draft.text, report),
         Draft, config.WRITER_MODEL, story_id=story_id, episode=context.number,
     )

@@ -247,3 +247,41 @@ Summarise Act "{act_title}" in at most 200 words from these episode summaries. F
 changed and what it set up.
 
 {summaries_text}"""
+
+
+def ripple_check_prompt(change_text: str, canon_text: str, episode_number: int, episode_text: str) -> str:
+    return f"""\
+The editor changed an earlier episode. Here is what changed:
+{change_text}
+
+Canon as it now stands (from the changed episode up to this one):
+{canon_text}
+
+Episode {episode_number} text:
+<episode>
+{episode_text}
+</episode>
+
+Does episode {episode_number} contradict the change? Only report passages that state or rely on
+something that is no longer true. For each one, copy the passage exactly as it appears (a phrase
+or one sentence) as quote, and say why in reason.
+verdict: "consistent" if nothing conflicts, "minor" if a few words or a sentence can fix it,
+"major" if the episode's events depend on what changed."""
+
+
+def ripple_patch_prompt(change_text: str, conflicts_text: str, episode_number: int, episode_text: str) -> str:
+    return f"""\
+The editor changed an earlier episode:
+{change_text}
+
+These passages of episode {episode_number} below now contradict it:
+{conflicts_text}
+
+<episode>
+{episode_text}
+</episode>
+
+Propose the smallest edits that remove these contradictions without changing what the episode
+is about. Each edit replaces one exact passage (copied character for character from the episode,
+usually one sentence) with new text in the same voice. Don't touch anything else.
+Return the edits and a one-line note on what you changed."""

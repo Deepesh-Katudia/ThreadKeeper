@@ -9,6 +9,7 @@ from story.models import Directive, Story
 from story.planner import plan_arc
 from story.queries import acts, all_episodes, characters, facts, find_character, get_episode, get_story
 from story.schemas import CharacterChange
+from tests.ripple_helpers import close, edit_and_confirm, edit_through_ripple
 
 TOTAL = 16
 
@@ -154,7 +155,7 @@ def test_editing_an_approved_episode_rewrites_its_memory(fake_model):
     fake_model.deaths = {}  # in the human's rewrite, Mr Das survives
     fake_model.diffs = {2: {"character_changes": [CharacterChange(name="Mr Das", new_status="alive", reason="lives")]}}
 
-    pipeline.edit_episode(story_id, 2, "A rewritten episode two. Mr Das lives.")
+    edit_through_ripple(story_id, 2, "A rewritten episode two. Mr Das lives.")
 
     with session_scope() as session:
         das = find_character(session, story_id, "Mr Das")
@@ -168,10 +169,11 @@ def test_editing_history_marks_later_unapproved_drafts_stale(fake_model):
     write_and_approve(story_id, 2)
     pipeline.write_episode(story_id, 3)  # waiting for review
 
-    pipeline.edit_episode(story_id, 1, "New version of episode one.")
+    ripple_id = edit_and_confirm(story_id, 1, "New version of episode one.")
 
     with session_scope() as session:
         assert get_episode(session, story_id, 3).status == "stale"
+    close(story_id, ripple_id)
     assert pipeline.next_episode_to_write(story_id) == 3
 
 

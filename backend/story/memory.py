@@ -151,7 +151,7 @@ def forget_episode(session, story_id: int, number: int) -> None:
 
 
 @traceable(name="refresh_story_so_far")
-def refresh_story_so_far(story_id: int, through_episode: int) -> None:
+def refresh_story_so_far(story_id: int, through_episode: int, step_prefix: str = "") -> None:
     """Fold the latest episode summaries into the running recap."""
     with session_scope() as session:
         story = get_story(session, story_id)
@@ -164,7 +164,7 @@ def refresh_story_so_far(story_id: int, through_episode: int) -> None:
         return
     summaries = "\n".join(f"Ep {e.number}: {e.summary}" for e in newer)
     recap = llm.write_json(
-        "story_so_far", prompts.extractor_system(),
+        f"{step_prefix}story_so_far", prompts.extractor_system(),
         prompts.story_so_far_prompt(previous_recap, summaries),
         Recap, config.EXTRACTOR_MODEL, story_id=story_id, episode=through_episode, max_tokens=2000,
     )
@@ -175,7 +175,7 @@ def refresh_story_so_far(story_id: int, through_episode: int) -> None:
 
 
 @traceable(name="summarise_act")
-def summarise_act(story_id: int, number: int) -> None:
+def summarise_act(story_id: int, number: int, step_prefix: str = "") -> None:
     with session_scope() as session:
         act = act_for_episode(session, story_id, number)
         if act is None:
@@ -185,7 +185,7 @@ def summarise_act(story_id: int, number: int) -> None:
         act_title, act_id = act.title, act.id
     summaries = "\n".join(f"Ep {e.number}: {e.summary}" for e in in_act)
     recap = llm.write_json(
-        "act_summary", prompts.extractor_system(), prompts.act_summary_prompt(act_title, summaries),
+        f"{step_prefix}act_summary", prompts.extractor_system(), prompts.act_summary_prompt(act_title, summaries),
         Recap, config.EXTRACTOR_MODEL, story_id=story_id, episode=number, max_tokens=1500,
     )
     with session_scope() as session:

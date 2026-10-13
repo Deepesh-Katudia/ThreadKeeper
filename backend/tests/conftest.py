@@ -15,7 +15,7 @@ from story import db, llm  # noqa: E402
 from story.schemas import (  # noqa: E402
     ActBeats, CriticReport, Draft, MemoryUpdate, PlannedAct, PlannedBeat, PlannedCharacter,
     PlannedThread, Problem, Recap, Replan, StoryBible, NewFact, CharacterChange, ThreadOpened, MemoryDiff,
-    NewCharacter,
+    NewCharacter, ContinuityCheck, Conflict, Patch, PatchEdit,
 )
 
 
@@ -33,6 +33,10 @@ class FakeModel:
         # episode number -> MemoryDiff fields (or a function of the prompt) for an edit of that episode
         self.diffs: dict = {}
         self.temperatures: list = []
+        self.draft_extra: dict[int, str] = {}  # episode number -> a sentence added to its draft
+        # episode number -> (verdict, [(quote, reason)]) when a ripple checks it; "consistent" otherwise
+        self.checks: dict[int, tuple] = {}
+        self.patches: dict[int, list[tuple[str, str]]] = {}  # episode number -> [(find, replace)]
 
     def __call__(self, system, prompt, model, max_tokens, schema, temperature=None):
         self.prompts.append((schema.__name__ if schema else "text", prompt))
@@ -72,7 +76,8 @@ class FakeModel:
     def answer_Draft(self, prompt):
         number = int(re.search(r"THIS EPISODE \(ep (\d+)\)", prompt).group(1))
         body = " ".join(["Ravi rode through the rain."] * 90)  # 450 words
-        return Draft(title=f"Episode {number}", text=f"{body} Episode {number} ends at a door.")
+        extra = f" {self.draft_extra[number]}" if number in self.draft_extra else ""
+        return Draft(title=f"Episode {number}", text=f"{body}{extra} Episode {number} ends at a door.")
 
     def answer_CriticReport(self, prompt):
         verdict = self.critic_verdicts.pop(0) if self.critic_verdicts else "pass"
@@ -106,6 +111,16 @@ class FakeModel:
             "character_changes": [], "threads_opened": [], "remove_thread_ids": [], "resolve_thread_ids": [],
             "reopen_thread_ids": [], **overrides,
         })
+
+    def answer_ContinuityCheck(self, prompt):
+        number = int(re.search(r"Episode (\d+) text:", prompt).group(1))
+        verdict, conflicts = self.checks.get(number, ("consistent", []))
+        return ContinuityCheck(verdict=verdict, conflicts=[Conflict(quote=q, reason=r) for q, r in conflicts])
+
+    def answer_Patch(self, prompt):
+        number = int(re.search(r"passages of episode (\d+)", prompt).group(1))
+        edits = [PatchEdit(find=f, replace=r) for f, r in self.patches.get(number, [])]
+        return Patch(edits=edits, note="smallest fix")
 
     def answer_Recap(self, prompt):
         return Recap(text="Recap of everything so far.")

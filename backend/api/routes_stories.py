@@ -5,12 +5,13 @@ from sqlalchemy import select
 
 from api.jobs import running_job, start_job
 from api.schemas import ArcEdit, NewStory
-from api.views import act_view, character_view, episode_brief, job_view, story_view
+from api.views import act_view, character_view, episode_brief, job_view, ripple_brief, story_view
 from story.db import session_scope
 from story.models import Character, Job, Story
 from story.pipeline import NotAllowed
 from story.planner import MISSING_BEAT, plan_arc, reset_plan
 from story.queries import acts, all_episodes, characters, get_episode, get_story
+from story.ripple import items_of, open_ripple
 
 router = APIRouter(prefix="/stories", tags=["stories"])
 
@@ -76,7 +77,13 @@ def get_story_overview(story_id: int):
             "next_episode": next((e.number for e in episodes if e.status != "approved"), None),
             "running_job": job_view(running_job(story_id)),
             "latest_job": job_view(latest_job),
+            "open_ripple": open_ripple_brief(session, story_id),
         }
+
+
+def open_ripple_brief(session, story_id: int) -> dict | None:
+    found = open_ripple(session, story_id)
+    return ripple_brief(found, items_of(session, found.id) if found else [])
 
 
 @router.put("/{story_id}/arc")

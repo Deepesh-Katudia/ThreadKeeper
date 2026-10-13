@@ -19,11 +19,10 @@ from story import config, evaluation, llm
 from story.context import build_episode_context
 from story.critic import needs_revision, review_draft, similar_earlier_episodes
 from story.db import session_scope
+from story.errors import NotAllowed
 from story.memory import commit_memory, extract_memory, load_update, refresh_story_so_far, summarise_act
-from story.memory_diff import extract_diff
-from story.versions import (
-    apply_version, ensure_v1, record_written_version, restore_now, save_version, version_with_same_text,
-)
+from story.ripple import block_if_open, start_ripple
+from story.versions import record_written_version
 from story.models import Directive, Episode, Job
 from story.planner import replan_upcoming_beats
 from story.queries import act_for_episode, all_episodes, characters, get_episode, get_story
@@ -31,10 +30,6 @@ from story.schemas import MemoryUpdate
 from story.writer import count_words, draft_episode, revise_episode
 
 log = logging.getLogger(__name__)
-
-
-class NotAllowed(ValueError):
-    """The request makes sense, just not right now (e.g. writing before the arc is approved)."""
 
 
 # --- Where are we? -------------------------------------------------------------------
@@ -45,6 +40,7 @@ def next_episode_to_write(story_id: int) -> int | None:
         story = get_story(session, story_id)
         if story.status != "writing":
             raise NotAllowed(f"The story is '{story.status}'. Approve the arc plan before writing.")
+        block_if_open(session, story_id)
         for episode in all_episodes(session, story_id):
             if episode.status == "in_review":
                 raise NotAllowed(f"Episode {episode.number} is waiting for your review first.")
@@ -92,24 +88,28 @@ def write_episode(story_id: int, number: int) -> None:
     evaluation.log_critic_scores(report_dict["trace_run_id"], report_dict, count_words(draft.text))
 
 
-def draft_until_good_enough(story_id: int, number: int, editor_note: str):
-    """Draft, then revise while the critic objects. Stops at MAX_REVISIONS or the cost cap."""
+def draft_until_good_enough(story_id: int, number: int, editor_note: str, step_prefix: str = "", budget=None):
+    """Draft, then revise while the critic objects. Stops at MAX_REVISIONS or the cost cap.
+
+    `budget` is (spent_so_far, cap); a ripple rewrite passes its own so it is held to the ripple's cap.
+    """
+    spent, cap = budget or (lambda: llm.episode_cost(story_id, number), config.EPISODE_COST_CAP_USD)
     with session_scope() as session:
         context = build_episode_context(session, story_id, number)
         cast = characters(session, story_id)
 
-    draft = draft_episode(story_id, context, editor_note)
-    report = review_draft(story_id, context, draft, cast)
+    draft = draft_episode(story_id, context, editor_note, step_prefix)
+    report = review_draft(story_id, context, draft, cast, step_prefix)
     attempts = [summarise_attempt(draft, report, "draft")]
 
     for _ in range(config.MAX_REVISIONS):
         if not needs_revision(report):
             break
-        if llm.episode_cost(story_id, number) >= config.EPISODE_COST_CAP_USD:
+        if spent() >= cap:
             attempts.append({"stage": "stopped", "reason": "cost cap reached"})
             break
-        draft = revise_episode(story_id, context, draft, report)
-        report = review_draft(story_id, context, draft, cast)
+        draft = revise_episode(story_id, context, draft, report, step_prefix)
+        report = review_draft(story_id, context, draft, cast, step_prefix)
         attempts.append(summarise_attempt(draft, report, "revision"))
 
     return context, draft, report, attempts
@@ -195,8 +195,13 @@ def needs_recap_refresh(number: int, ends_act: bool) -> bool:
     return number < config.STORY_SO_FAR_EVERY or number % config.STORY_SO_FAR_EVERY == 0 or ends_act
 
 
-def edit_episode(story_id: int, number: int, new_text: str, new_title: str | None = None) -> None:
-    """A human rewrites an episode. Works on drafts under review and on already-approved history."""
+def edit_episode(story_id: int, number: int, new_text: str, new_title: str | None = None) -> int | None:
+    """A human rewrites an episode.
+
+    A draft under review just gets new text and fresh memory. An approved episode starts a
+    ripple review instead (story/ripple.py) and its id is returned: canon only changes once the
+    human has confirmed the memory diff, and later episodes are checked before writing resumes.
+    """
     if not new_text.strip():
         raise NotAllowed("The episode text can't be empty.")
     with session_scope() as session:
@@ -204,12 +209,13 @@ def edit_episode(story_id: int, number: int, new_text: str, new_title: str | Non
         if episode.status not in ("in_review", "approved"):
             raise NotAllowed(f"Episode {number} has no text to edit yet.")
         was_approved = episode.status == "approved"
+        if was_approved:
+            block_if_open(session, story_id)
         trace_run_id = episode.critic_report.get("trace_run_id")
 
     evaluation.log_human_decision(trace_run_id, "edited", "approved episode rewritten" if was_approved else "draft edited before approval")
     if was_approved:
-        edit_approved_episode(story_id, number, new_text, new_title)
-        return
+        return start_ripple(story_id, number, new_text, new_title)
 
     update = extract_memory(story_id, number, new_text)
     with session_scope() as session:
@@ -218,42 +224,7 @@ def edit_episode(story_id: int, number: int, new_text: str, new_title: str | Non
         episode.title = new_title or episode.title
         episode.was_edited_by_human = True
         episode.pending_memory = update.model_dump()
-
-
-def edit_approved_episode(story_id: int, number: int, new_text: str, new_title: str | None) -> None:
-    """Save the edit as a new version and change memory by difference (or restore, for a known text)."""
-    with session_scope() as session:
-        ensure_v1(session, story_id, number)
-        episode = get_episode(session, story_id, number)
-        old_text, title = episode.text, new_title or episode.title
-        same = version_with_same_text(session, story_id, number, new_text)
-        restore_to = same.version if same else None
-
-    diff = None if restore_to else extract_diff(story_id, number, old_text, new_text)
-
-    with session_scope() as session:
-        if restore_to:
-            restore_now(session, story_id, number, restore_to)
-        else:
-            row = save_version(session, story_id, number, title, new_text, "human_edit")
-            apply_version(session, story_id, number, row, diff)
-        get_episode(session, story_id, number).was_edited_by_human = True
-        mark_later_drafts_stale(session, story_id, number)
-        story = get_story(session, story_id)
-        rebuild_recap_through = story.story_so_far_through
-        if rebuild_recap_through >= number:
-            story.story_so_far, story.story_so_far_through = "", 0
-
-    if rebuild_recap_through >= number:
-        refresh_story_so_far(story_id, rebuild_recap_through)
-
-
-def mark_later_drafts_stale(session, story_id: int, number: int) -> None:
-    """Unapproved drafts after an edited episode were written against old memory."""
-    for episode in all_episodes(session, story_id):
-        if episode.number > number and episode.status == "in_review":
-            episode.status = "stale"
-            episode.pending_memory = {}
+    return None
 
 
 def reject_episode(story_id: int, number: int, reason: str) -> None:

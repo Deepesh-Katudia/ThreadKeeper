@@ -11,6 +11,7 @@ from story.queries import (
     characters, episode_facts, facts, facts_including_retracted, find_character, get_episode, threads, versions_of,
 )
 from story.schemas import CharacterChange, NewFact
+from tests.ripple_helpers import edit_through_ripple
 from tests.test_pipeline import new_story, write_and_approve
 
 EXTRACTOR_SCHEMAS = ("MemoryUpdate", "MemoryDiff")
@@ -74,7 +75,7 @@ def test_an_edit_retracts_facts_instead_of_deleting_them(fake_model):
         "new_facts": [NewFact(subject="the locker", statement="locker 117")],
     }}
 
-    pipeline.edit_episode(story_id, 2, "Episode two, now with locker 117.")
+    edit_through_ripple(story_id, 2, "Episode two, now with locker 117.")
 
     with session_scope() as session:
         everything = {f.statement: f for f in facts_including_retracted(session, story_id)}
@@ -97,7 +98,7 @@ def test_the_diff_cannot_touch_other_episodes_or_break_time_order(fake_model):
         bell = next(t.id for t in threads(session, story_id) if t.title == "Who rang the bell")
     fake_model.diffs = {2: {"retract_fact_ids": [ep1_fact], "resolve_thread_ids": [bell]}}
 
-    pipeline.edit_episode(story_id, 2, "Episode two again.")
+    edit_through_ripple(story_id, 2, "Episode two again.")
 
     with session_scope() as session:
         assert ep1_fact in [f.id for f in facts(session, story_id)]
@@ -123,7 +124,7 @@ def test_restoring_the_original_text_restores_canon_exactly_without_a_model_call
         "character_changes": [CharacterChange(name="Mr Das", new_status="alive", reason="lives")],
     }}
 
-    pipeline.edit_episode(story_id, 3, "Episode three, rewritten by the editor.")
+    edit_through_ripple(story_id, 3, "Episode three, rewritten by the editor.")
 
     edited = canon(story_id)
     assert edited != before
@@ -131,7 +132,7 @@ def test_restoring_the_original_text_restores_canon_exactly_without_a_model_call
     assert not any(name == "Woman In Green" for name, *_ in edited["characters"])
     calls_before_undo = extractor_calls(fake_model)
 
-    pipeline.edit_episode(story_id, 3, original)  # same text as version 1: a restore
+    edit_through_ripple(story_id, 3, original)  # same text as version 1: a restore
 
     assert canon(story_id) == before
     assert extractor_calls(fake_model) == calls_before_undo
@@ -152,7 +153,7 @@ def test_an_episode_approved_before_versions_existed_gets_version_one_when_edite
         assert len(facts(session, story_id)) == 3  # NULL counts as active
     fake_model.diffs = {2: lambda prompt: {"retract_fact_ids": [id_in(prompt, "Ravi Menon: fact from episode 2")]}}
 
-    pipeline.edit_episode(story_id, 2, "Episode two, edited long after it was approved.")
+    edit_through_ripple(story_id, 2, "Episode two, edited long after it was approved.")
 
     with session_scope() as session:
         v1, v2 = versions_of(session, story_id, 2)
