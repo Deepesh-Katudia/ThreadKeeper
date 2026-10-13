@@ -41,7 +41,7 @@ class EpisodeContext:
 
 def build_episode_context(session: Session, story_id: int, number: int) -> EpisodeContext:
     story = get_story(session, story_id)
-    cast = characters(session, story_id)
+    cast = [c for c in characters(session, story_id) if c.first_episode < number]
     recent = approved_episodes_before(session, story_id, number, config.RECENT_SUMMARIES)
     beats_ahead = episodes_between(session, story_id, number, number + config.UPCOMING_BEATS)
     relevant_people = pick_relevant_characters(cast, recent, beats_ahead)
@@ -54,7 +54,7 @@ def build_episode_context(session: Session, story_id: int, number: int) -> Episo
         "How the previous episode ended": previous_ending(session, story_id, number),
         "This episode's beat and what comes next": describe_beats(session, story_id, number, beats_ahead),
         "Characters in play": describe_characters(relevant_people, cast),
-        "Canon facts to respect": describe_facts(session, story_id, relevant_people, beats_ahead),
+        "Canon facts to respect": describe_facts(session, story_id, number, relevant_people, beats_ahead),
         "Open threads": describe_threads(session, story_id, number),
         "Standing instructions from the editor": describe_directives(session, story_id, number),
     }
@@ -87,13 +87,16 @@ def describe_recent(recent: list[Episode]) -> str:
 
 
 def previous_ending(session: Session, story_id: int, number: int) -> str:
+    """The previous episode's opening line (often a header with addresses and times) and its last words."""
     if number <= 1:
         return ""
     previous = get_episode(session, story_id, number - 1)
     if previous.status != "approved" or not previous.text:
         return ""
     words = previous.text.split()
-    return "..." + " ".join(words[-config.LAST_WORDS_OF_PREVIOUS:])
+    ending = "..." + " ".join(words[-config.LAST_WORDS_OF_PREVIOUS:])
+    opening = first_line(previous.text)
+    return f"Opening line: {opening}\n{ending}" if opening else ending
 
 
 def describe_beats(session: Session, story_id: int, number: int, beats_ahead: list[Episode]) -> str:
@@ -141,8 +144,16 @@ def describe_characters(relevant: list[Character], cast: list[Character]) -> str
     return "\n".join(lines)
 
 
-def describe_facts(session: Session, story_id: int, relevant: list[Character], beats_ahead: list[Episode]) -> str:
-    all_facts = facts(session, story_id)
+def describe_facts(
+    session: Session, story_id: int, number: int, relevant: list[Character], beats_ahead: list[Episode],
+) -> str:
+    """Every fact from the last few episodes, then facts about who and what is in play, then the newest.
+
+    The recent window comes first and survives the cap: a fact from the previous episode matters
+    most to this one, even when it is about an object or place nobody's name matches.
+    """
+    # Only canon from earlier episodes: when a ripple rewrites episode 7, episode 9's facts don't exist yet.
+    all_facts = [f for f in facts(session, story_id) if f.source_episode < number]
     beat_text = " ".join(e.beat for e in beats_ahead).lower()
     names = {c.name.lower() for c in relevant} | {first_name(c).lower() for c in relevant}
 
@@ -150,13 +161,23 @@ def describe_facts(session: Session, story_id: int, relevant: list[Character], b
         subject = fact.subject.lower()
         return subject in names or subject in beat_text or any(n in fact.statement.lower() for n in names)
 
-    picked = [f for f in all_facts if is_relevant(f)]
+    recent = [f for f in all_facts if number - config.RECENT_FACT_EPISODES <= f.source_episode < number]
+    matched = [f for f in all_facts if is_relevant(f)]
     newest = all_facts[-10:]
-    chosen = {f.id: f for f in picked + newest}
-    ordered = sorted(chosen.values(), key=lambda f: f.source_episode)[-config.MAX_FACTS_IN_CONTEXT:]
-    if not ordered:
+    chosen = pick_facts(recent, matched + newest, config.MAX_FACTS_IN_CONTEXT)
+    if not chosen:
         return "(Nothing established yet.)"
-    return "\n".join(f"- (ep {f.source_episode}) {f.subject}: {f.statement}" for f in ordered)
+    return "\n".join(f"- (ep {f.source_episode}) {f.subject}: {f.statement}" for f in chosen)
+
+
+def pick_facts(recent: list, others: list, limit: int) -> list:
+    """The recent facts first (newest kept if even they overflow), then the others, newest first."""
+    kept = {f.id: f for f in recent[-limit:]}
+    for fact in sorted(others, key=lambda f: f.source_episode, reverse=True):
+        if len(kept) >= limit:
+            break
+        kept.setdefault(fact.id, fact)
+    return sorted(kept.values(), key=lambda f: (f.source_episode, f.id))
 
 
 def describe_threads(session: Session, story_id: int, number: int) -> str:
@@ -188,6 +209,10 @@ def describe_earlier_episodes(session: Session, story_id: int, number: int, skip
 
 
 # --- Tiny text helpers -----------------------------------------------------------
+
+
+def first_line(text: str) -> str:
+    return next((line.strip() for line in text.splitlines() if line.strip()), "")
 
 
 def first_name(person: Character) -> str:

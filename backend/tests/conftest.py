@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from story import db, llm  # noqa: E402
 from story.schemas import (  # noqa: E402
     ActBeats, CriticReport, Draft, MemoryUpdate, PlannedAct, PlannedBeat, PlannedCharacter,
-    PlannedThread, Problem, Recap, Replan, StoryBible, NewFact, CharacterChange,
+    PlannedThread, Problem, Recap, Replan, StoryBible, NewFact, CharacterChange, ThreadOpened,
 )
 
 
@@ -25,6 +25,9 @@ class FakeModel:
         self.prompts: list[tuple[str, str]] = []  # (schema name, prompt)
         self.critic_verdicts: list[str] = []  # queue of verdicts; "pass" once it runs out
         self.deaths: dict[int, str] = {}  # episode number -> name of someone who dies in it
+        self.opens: dict[int, list[str]] = {}  # episode number -> thread titles it raises
+        self.resolves: dict[int, list[str]] = {}  # episode number -> thread titles it answers
+        self.extra_facts: dict[int, list[NewFact]] = {}  # episode number -> more facts it establishes
 
     def __call__(self, system, prompt, model, max_tokens, schema):
         self.prompts.append((schema.__name__ if schema else "text", prompt))
@@ -79,8 +82,10 @@ class FakeModel:
             summary=f"In episode {number} unique-event-{number} happened to someone new-{number * 7}.",
             hook=f"hook {number}", characters_present=["Ravi Menon"], new_characters=[],
             character_changes=changes,
-            new_facts=[NewFact(subject="Ravi Menon", statement=f"fact from episode {number}")],
-            threads_opened=[], threads_resolved=[],
+            new_facts=[NewFact(subject="Ravi Menon", statement=f"fact from episode {number}")]
+            + self.extra_facts.get(number, []),
+            threads_opened=[ThreadOpened(title=t, description="?") for t in self.opens.get(number, [])],
+            threads_resolved=list(self.resolves.get(number, [])),
         )
 
     def answer_Recap(self, prompt):

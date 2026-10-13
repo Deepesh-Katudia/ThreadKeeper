@@ -68,6 +68,13 @@ MAX_FACTS_IN_CONTEXT = 40
 MAX_THREADS_IN_CONTEXT = 12
 STORY_SO_FAR_EVERY = 10
 LAST_WORDS_OF_PREVIOUS = 150
+# Facts from the last few episodes always reach the writer, whoever they are about: the
+# handoff between neighbouring episodes is where continuity breaks first.
+RECENT_FACT_EPISODES = int(os.getenv("RECENT_FACT_EPISODES", "3"))
+
+# Ripple review: what happens to later episodes when a human edits an approved one.
+RIPPLE_WINDOW = int(os.getenv("RIPPLE_WINDOW", "20"))
+RIPPLE_COST_CAP_USD = float(os.getenv("RIPPLE_COST_CAP_USD", "0.50"))
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///threadkeeper.db")
 ACCESS_KEY = os.getenv("ACCESS_KEY", "")

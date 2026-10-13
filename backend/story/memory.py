@@ -24,13 +24,23 @@ THREAD_TITLE_MATCH = 0.5
 @traceable(name="extract_memory")
 def extract_memory(story_id: int, number: int, episode_text: str) -> MemoryUpdate:
     with session_scope() as session:
-        known_cast = ", ".join(c.name for c in characters(session, story_id)) or "(none)"
-        open_threads = "; ".join(t.title for t in threads(session, story_id, ("open",))) or "(none)"
+        known_cast = ", ".join(c.name for c in known_by(session, story_id, number)) or "(none)"
+        open_threads = "; ".join(t.title for t in open_threads_at(session, story_id, number)) or "(none)"
     return llm.write_json(
         "extract_memory", prompts.extractor_system(),
         prompts.extractor_prompt(number, episode_text, known_cast, open_threads),
         MemoryUpdate, config.EXTRACTOR_MODEL, story_id=story_id, episode=number, max_tokens=4000,
     )
+
+
+def known_by(session, story_id: int, number: int) -> list[Character]:
+    """Characters that exist by episode `number`: planned ones (0) and those already introduced."""
+    return [c for c in characters(session, story_id) if c.first_episode <= number]
+
+
+def open_threads_at(session, story_id: int, number: int) -> list[Thread]:
+    """Open threads as of episode `number`. Re-extracting episode 5 must not see a thread from episode 8."""
+    return [t for t in threads(session, story_id, ("open",)) if t.opened_episode <= number]
 
 
 def commit_memory(session, story_id: int, number: int, update: MemoryUpdate) -> None:
@@ -83,11 +93,17 @@ def record_threads(session, story_id: int, number: int, update: MemoryUpdate) ->
         elif existing.status == "planned":
             existing.status = "open"
 
+    resolvable = [t for t in all_threads if can_resolve_in(t, number)]
     for title in update.threads_resolved:
-        existing = best_thread_match(all_threads, title)
+        existing = best_thread_match(resolvable, title)
         if existing is not None and existing.status != "resolved":
             existing.status = "resolved"
             existing.resolved_episode = number
+
+
+def can_resolve_in(thread: Thread, number: int) -> bool:
+    """An episode can only answer a question that has already been asked."""
+    return thread.opened_episode <= number
 
 
 def best_thread_match(candidates: list[Thread], title: str) -> Thread | None:
@@ -116,8 +132,10 @@ def forget_episode(session, story_id: int, number: int) -> None:
     for thread in threads(session, story_id):
         if thread.resolved_episode == number:
             thread.status, thread.resolved_episode = "open", 0
-        elif thread.opened_episode == number and thread.payoff_episode == 0:
-            session.delete(thread)  # it was invented by that episode, not by the arc plan
+        elif thread.opened_episode == number and thread.payoff_episode == 0 and thread.resolved_episode == 0:
+            # Invented by that episode, not by the arc plan, and no later episode answered it.
+            # A thread a later episode resolved stays: deleting it would lose that payoff.
+            session.delete(thread)
     session.flush()
 
 

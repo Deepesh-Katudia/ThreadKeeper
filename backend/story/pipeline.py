@@ -175,10 +175,15 @@ def approve_episode(story_id: int, number: int) -> None:
 
     evaluation.log_human_decision(trace_run_id, "approved")
 
-    if number % config.STORY_SO_FAR_EVERY == 0 or ends_act:
+    if needs_recap_refresh(number, ends_act):
         refresh_story_so_far(story_id, number)
     if ends_act:
         summarise_act(story_id, number)
+
+
+def needs_recap_refresh(number: int, ends_act: bool) -> bool:
+    """Every episode early on (so the recap is never empty after episode 1), then every 10th and at act ends."""
+    return number < config.STORY_SO_FAR_EVERY or number % config.STORY_SO_FAR_EVERY == 0 or ends_act
 
 
 def edit_episode(story_id: int, number: int, new_text: str, new_title: str | None = None) -> None:

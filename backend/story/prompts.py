@@ -165,6 +165,9 @@ Record:
 - character_changes: only if someone dies, goes missing, or comes back
 - new_facts: 2-6 durable facts future episodes must not contradict (who knows what,
   relationships, injuries, objects, places, rules of the world). Skip passing moments.
+  Be concrete: record exact addresses, room and locker numbers, objects and what is written on
+  them, times and amounts. If the episode opens with a header line (an order, a date, an
+  address), record what it says as a fact.
 - threads_opened: new mysteries or promises raised in this episode
 - threads_resolved: titles of open threads (from the list above) this episode answers"""
 
