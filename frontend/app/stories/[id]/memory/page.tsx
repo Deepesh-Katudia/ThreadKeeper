@@ -13,6 +13,8 @@ export default function MemoryPage() {
   const { storyId, overview } = useStory();
   const fetchMemory = useCallback(() => api.memory(storyId), [storyId]);
   const { data: memory, error, setError, reload } = useLoader(fetchMemory);
+  const fetchCheck = useCallback(() => api.memoryCheck(storyId), [storyId]);
+  const { data: check } = useLoader(fetchCheck);
   const [factFilter, setFactFilter] = useState("");
 
   const header = <StoryNav storyId={storyId} title={overview?.story.title ?? ""} />;
@@ -29,6 +31,7 @@ export default function MemoryPage() {
     }
   }
 
+  const activeFacts = memory.facts.filter((f) => f.is_active).length;
   const facts = memory.facts.filter((f) => `${f.subject} ${f.statement}`.toLowerCase().includes(factFilter.toLowerCase()));
 
   return (
@@ -37,6 +40,12 @@ export default function MemoryPage() {
       <PaneBody>
         <div className="mx-auto max-w-5xl">
           <ErrorBox message={error} />
+          {check && check.problems.length > 0 && (
+            <div className="mb-6 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              <p className="font-medium">Memory check found {check.problems.length} problem{check.problems.length === 1 ? "" : "s"}:</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5">{check.problems.map((p, i) => <li key={i} className="break-words">{p}</li>)}</ul>
+            </div>
+          )}
 
           <Section title="Standing instructions">
             {memory.directives.length === 0 ? (
@@ -78,7 +87,7 @@ export default function MemoryPage() {
 
           <Section title={`Story so far · recap through episode ${memory.story_so_far_through}`}>
             <Card className="p-4">
-              <p className="text-sm leading-relaxed break-words whitespace-pre-wrap text-muted">{memory.story_so_far || "Written every 10 episodes."}</p>
+              <p className="text-sm leading-relaxed break-words whitespace-pre-wrap text-muted">{memory.story_so_far || "Written after each early episode, then every 10."}</p>
             </Card>
           </Section>
 
@@ -113,7 +122,7 @@ export default function MemoryPage() {
           </Section>
 
           <Section
-            title={`Canon facts · ${memory.facts.length}`}
+            title={`Canon facts · ${activeFacts}${activeFacts < memory.facts.length ? ` (+${memory.facts.length - activeFacts} retracted)` : ""}`}
             aside={
               <label className="flex items-center gap-2 rounded-md border border-line px-2.5 py-1 text-sm">
                 <SearchIcon className="h-3.5 w-3.5 text-faint" />
@@ -123,10 +132,16 @@ export default function MemoryPage() {
           >
             <Table headers={["Episode", "Subject", "Fact"]}>
               {facts.map((f) => (
-                <tr key={f.id}>
-                  <Cell className="text-faint">{f.source_episode}</Cell>
-                  <Cell className="font-medium">{f.subject}</Cell>
-                  <Cell className="text-muted">{f.statement}</Cell>
+                <tr key={f.id} className={f.is_active ? "" : "opacity-60"}>
+                  <Cell className="whitespace-nowrap text-faint">
+                    {f.source_episode}
+                    {f.source_version ? <span className="ml-1 text-[11px]">v{f.source_version}</span> : null}
+                  </Cell>
+                  <Cell className={`font-medium ${f.is_active ? "" : "line-through"}`}>{f.subject}</Cell>
+                  <Cell className="text-muted">
+                    <span className={f.is_active ? "" : "line-through"}>{f.statement}</span>
+                    {!f.is_active && <span className="mt-0.5 block text-[11px] text-red-300">retracted by {f.retracted_reason || "an edit"}</span>}
+                  </Cell>
                 </tr>
               ))}
             </Table>

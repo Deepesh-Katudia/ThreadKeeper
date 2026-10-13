@@ -49,6 +49,17 @@ export default function CostsPage() {
             </Card>
           </Section>
 
+          {costs.prompt_sizes.length > 1 && (
+            <Section title="Writer prompt size per episode">
+              <Card className="p-4">
+                <PromptSizeChart points={costs.prompt_sizes} />
+                <p className="mt-2 text-[11px] text-faint">
+                  Characters of story memory sent to the writer. It stays roughly flat: context doesn&apos;t grow with the story.
+                </p>
+              </Card>
+            </Section>
+          )}
+
           <Section title="Per episode">
             <Table headers={["Ep", "Cost", "Calls", "Revisions", "Failed", "Tokens in / out", "Model time"]}>
               {costs.per_episode.map((row) => (
@@ -95,5 +106,33 @@ function Stat({ label, value }: { label: string; value: string }) {
       <p className="text-[11px] tracking-wide text-faint uppercase">{label}</p>
       <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
     </Card>
+  );
+}
+
+const CHART_WIDTH = 640;
+const CHART_HEIGHT = 140;
+const CHART_PAD = 28;
+
+/** A small line chart: episode number across, prompt characters up. */
+function PromptSizeChart({ points }: { points: { episode: number; context_chars: number }[] }) {
+  const maxChars = Math.max(...points.map((p) => p.context_chars));
+  const first = points[0].episode;
+  const last = points[points.length - 1].episode;
+  const x = (episode: number) => CHART_PAD + ((episode - first) / Math.max(1, last - first)) * (CHART_WIDTH - 2 * CHART_PAD);
+  const y = (chars: number) => CHART_HEIGHT - CHART_PAD - (chars / maxChars) * (CHART_HEIGHT - 2 * CHART_PAD);
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.episode).toFixed(1)},${y(p.context_chars).toFixed(1)}`).join(" ");
+  return (
+    <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} className="h-auto w-full" role="img" aria-label="Writer prompt size per episode">
+      <line x1={CHART_PAD} x2={CHART_WIDTH - CHART_PAD} y1={y(0)} y2={y(0)} className="stroke-line" />
+      <text x={CHART_PAD} y={y(maxChars) - 6} className="fill-faint text-[10px]">{maxChars.toLocaleString()} chars</text>
+      <path d={path} fill="none" className="stroke-emerald-400" strokeWidth={2} />
+      {points.map((p) => (
+        <circle key={p.episode} cx={x(p.episode)} cy={y(p.context_chars)} r={3} className="fill-emerald-400">
+          <title>{`Episode ${p.episode}: ${p.context_chars.toLocaleString()} characters`}</title>
+        </circle>
+      ))}
+      <text x={CHART_PAD} y={CHART_HEIGHT - 8} className="fill-faint text-[10px]">ep {first}</text>
+      <text x={CHART_WIDTH - CHART_PAD} y={CHART_HEIGHT - 8} textAnchor="end" className="fill-faint text-[10px]">ep {last}</text>
+    </svg>
   );
 }

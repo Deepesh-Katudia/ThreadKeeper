@@ -4,6 +4,8 @@ import { useCallback, useState } from "react";
 
 import { EpisodeReview } from "@/components/EpisodeReview";
 import { FeedbackBox } from "@/components/FeedbackBox";
+import { ContinuityBadge, RippleBanner } from "@/components/RippleBadges";
+import { RippleReview } from "@/components/RippleReview";
 import { SearchIcon } from "@/components/icons";
 import { Button, ErrorBox, PaneBody, Spinner, StatusBadge, StoryNav } from "@/components/ui";
 import { api, EpisodeBrief, Job } from "@/lib/api";
@@ -19,11 +21,14 @@ export default function EpisodesPage() {
   const [batchSize, setBatchSize] = useState(1);
   const [autoApprove, setAutoApprove] = useState(false);
   const [jobMessage, setJobMessage] = useState<string | null>(null);
+  const [showRipple, setShowRipple] = useState(false);
+  const [jobsFinished, setJobsFinished] = useState(0);
 
   const { watch, isRunning } = useJob(
     useCallback(
       (finished: Job) => {
         setJobMessage(finished.status === "failed" ? `Failed: ${finished.detail}` : finished.detail || null);
+        setJobsFinished((n) => n + 1);
         reload();
       },
       [reload],
@@ -35,7 +40,7 @@ export default function EpisodesPage() {
     return <PaneBody>{error ? <ErrorBox message={error} /> : <Spinner label="Loading…" />}</PaneBody>;
   }
 
-  const { story, episodes } = overview;
+  const { story, episodes, open_ripple: openRipple } = overview;
 
   if (["planning", "arc_review", "planning_failed"].includes(story.status)) {
     return (
@@ -49,7 +54,8 @@ export default function EpisodesPage() {
   const shown = selected ?? episodeNeedingAttention(episodes);
   const visible = filterEpisodes(visibleEpisodes(episodes), search);
   const waitingForReview = episodes.find((e) => e.status === "in_review");
-  const canWrite = !isRunning && !waitingForReview && overview.next_episode !== null;
+  const canWrite = !isRunning && !waitingForReview && !openRipple && overview.next_episode !== null;
+  const rippleShown = showRipple && openRipple !== null;
 
   async function writeNext() {
     setError(null);
@@ -68,6 +74,10 @@ export default function EpisodesPage() {
     if (job) watch(job);
     reload();
   };
+  const openEpisode = (number: number) => {
+    setSelected(number);
+    setShowRipple(false);
+  };
 
   return (
     <>
@@ -85,9 +95,9 @@ export default function EpisodesPage() {
             {visible.map((episode) => (
               <button
                 key={episode.number}
-                onClick={() => setSelected(episode.number)}
+                onClick={() => openEpisode(episode.number)}
                 className={`flex w-full items-start gap-3 border-b border-line px-3 py-2.5 text-left transition ${
-                  shown === episode.number ? "bg-subtle" : "hover:bg-subtle/50"
+                  shown === episode.number && !rippleShown ? "bg-subtle" : "hover:bg-subtle/50"
                 }`}
               >
                 <span className="w-6 shrink-0 pt-0.5 text-right text-xs text-faint">{episode.number}</span>
@@ -95,7 +105,10 @@ export default function EpisodesPage() {
                   <span className="block text-sm break-words">{episode.title || episode.beat}</span>
                   <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
                     <StatusBadge status={episode.status} />
-                    {episode.was_edited_by_human && <span className="text-[11px] text-violet-400">edited</span>}
+                    {episode.was_edited_by_human && !episode.continuity && !(episode.current_version && episode.current_version > 1) && (
+                      <span className="text-[11px] text-violet-400">edited</span>
+                    )}
+                    <ContinuityBadge episode={episode} openRipple={openRipple} />
                     {episode.passed_critic === false && episode.status !== "approved" && (
                       <span className="text-[11px] text-red-400">critic flagged</span>
                     )}
@@ -109,12 +122,17 @@ export default function EpisodesPage() {
 
         {/* Right: controls, the episode, and the story-wide feedback composer */}
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {openRipple && <RippleBanner ripple={openRipple} onReview={() => setShowRipple(true)} />}
           <div className="flex min-h-[41px] flex-wrap items-center gap-2 border-b border-line px-4 py-1.5">
             <Button
               variant="primary"
               onClick={writeNext}
               disabled={!canWrite}
-              title={waitingForReview ? `Approve, edit or reject episode ${waitingForReview.number} first` : undefined}
+              title={
+                openRipple
+                  ? `Finish the ripple review for episode ${openRipple.source_episode} first`
+                  : waitingForReview ? `Approve, edit or reject episode ${waitingForReview.number} first` : undefined
+              }
             >
               Write episode {overview.next_episode ?? "–"}{batchSize > 1 ? ` +${batchSize - 1}` : ""}
             </Button>
@@ -128,19 +146,28 @@ export default function EpisodesPage() {
               <input type="checkbox" checked={autoApprove} onChange={(e) => setAutoApprove(e.target.checked)} className="accent-current" />
               Auto-approve what the critic passes
             </label>
-            {isRunning && <Spinner label="Drafting, reviewing, extracting memory…" />}
+            {isRunning && <Spinner label={openRipple ? "Checking and fixing later episodes…" : "Drafting, reviewing, extracting memory…"} />}
             {!isRunning && jobMessage && <span className="text-xs break-words text-muted">{jobMessage}</span>}
           </div>
 
           <PaneBody className="space-y-4">
             <ErrorBox message={error} />
-            {shown !== null ? (
+            {rippleShown && openRipple ? (
+              <RippleReview
+                key={`${openRipple.id}-${openRipple.status}-${openRipple.counts.decided}-${jobsFinished}`}
+                storyId={storyId}
+                rippleId={openRipple.id}
+                isBusy={isRunning}
+                onChanged={onChanged}
+              />
+            ) : shown !== null ? (
               <EpisodeReview
                 key={`${shown}-${episodes.find((e) => e.number === shown)?.status}`}
                 storyId={storyId}
                 number={shown}
                 isBusy={isRunning}
                 onChanged={onChanged}
+                onRippleStarted={() => setShowRipple(true)}
               />
             ) : (
               <p className="text-sm text-muted">Write the first episode to get started.</p>

@@ -39,8 +39,13 @@ def costs(story_id: int):
     with session_scope() as session:
         story = get_story(session, story_id)
         calls = list(session.scalars(select(LLMCall).where(LLMCall.story_id == story_id).order_by(LLMCall.id)))
-        approved = [e.number for e in all_episodes(session, story_id) if e.status == "approved"]
+        episodes = all_episodes(session, story_id)
+        approved = [e.number for e in episodes if e.status == "approved"]
         total_episodes = story.total_episodes
+        prompt_sizes = [
+            {"episode": e.number, "context_chars": size}
+            for e in episodes if e.status == "approved" and (size := prompt_size(e.critic_report or {}))
+        ]
 
     per_episode = summarise_by_episode(calls)
     evals = [c for c in calls if c.step.startswith("eval_")]
@@ -53,8 +58,17 @@ def costs(story_id: int):
         "per_episode": [per_episode[n] for n in sorted(per_episode)],
         "projection": project_full_run(written, total_episodes, planning),
         "cost_cap_per_episode_usd": config.EPISODE_COST_CAP_USD,
+        "prompt_sizes": prompt_sizes,
         "recent_calls": [call_view(c) for c in calls[-200:]],
     }
+
+
+def prompt_size(report: dict) -> int:
+    """Characters of memory in the writer's prompt. Older episodes only stored the sections themselves."""
+    if report.get("context_chars"):
+        return int(report["context_chars"])
+    sections = report.get("context_sent") or {}
+    return sum(len(name) + len(body) + 5 for name, body in sections.items()) if isinstance(sections, dict) else 0
 
 
 def summarise_by_episode(calls: list[LLMCall]) -> dict[int, dict]:

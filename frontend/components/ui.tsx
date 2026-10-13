@@ -25,6 +25,13 @@ const STATUS_TONES: Record<string, string> = {
   missing: "text-orange-400",
   open: "text-amber-400",
   resolved: "text-emerald-400",
+  // Ripple review
+  confirm_memory: "text-amber-400",
+  scanning: "text-sky-400",
+  reviewing: "text-amber-400",
+  replan_review: "text-amber-400",
+  closed: "text-emerald-400",
+  cancelled: "text-faint",
 };
 
 export function StatusBadge({ status }: { status: string }) {
@@ -32,7 +39,7 @@ export function StatusBadge({ status }: { status: string }) {
   return (
     <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded border border-line px-1.5 py-0.5 text-[11px] ${tone}`}>
       <span className="h-1.5 w-1.5 rounded-full bg-current" />
-      {status.replace("_", " ")}
+      {status.replaceAll("_", " ")}
     </span>
   );
 }
@@ -170,6 +177,7 @@ export function StoryNav({ storyId, title }: { storyId: number; title: string })
     { href: `/stories/${storyId}`, label: "Arc" },
     { href: `/stories/${storyId}/episodes`, label: "Episodes" },
     { href: `/stories/${storyId}/memory`, label: "Memory" },
+    { href: `/stories/${storyId}/history`, label: "History" },
     { href: `/stories/${storyId}/evals`, label: "Evals" },
     { href: `/stories/${storyId}/costs`, label: "Costs" },
   ];

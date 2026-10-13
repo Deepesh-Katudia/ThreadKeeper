@@ -16,6 +16,7 @@ export interface Story {
   total_episodes: number;
   story_so_far: string;
   story_so_far_through: number;
+  history_mode?: "repair" | "retcon";
   approved_episodes?: number;
 }
 
@@ -49,6 +50,21 @@ export interface EpisodeBrief {
   title: string;
   passed_critic: boolean | null;
   was_edited_by_human: boolean;
+  current_version: number | null;
+  continuity: Continuity | null;
+}
+
+export type CheckStatus = "pending" | "unaffected" | "minor" | "major" | "recheck";
+export type RippleDecisionKind = "accept" | "edit" | "keep" | "rewrite";
+export type RippleStatus = "confirm_memory" | "scanning" | "reviewing" | "replan_review" | "closed" | "cancelled";
+
+/** The latest ripple's verdict on one episode. */
+export interface Continuity {
+  ripple_id: number;
+  check_status: CheckStatus;
+  decision: RippleDecisionKind | null;
+  resulting_version?: number | null;
+  fix_kind?: "patch" | "rewrite" | null;
 }
 
 export interface Problem {
@@ -94,6 +110,109 @@ export interface StoryOverview {
   next_episode: number | null;
   running_job: Job | null;
   latest_job: Job | null;
+  open_ripple: RippleBrief | null;
+}
+
+export interface RippleCounts {
+  pending: number;
+  unaffected: number;
+  minor: number;
+  major: number;
+  recheck: number;
+  decided: number;
+  waiting: number;
+}
+
+export interface RippleBrief {
+  id: number;
+  status: RippleStatus;
+  source_episode: number;
+  from_version: number;
+  to_version: number;
+  counts: RippleCounts;
+  summary: string;
+}
+
+/** The memory diff in readable form, as stored on the ripple. */
+export interface RippleChange {
+  retracted: { id: number; subject: string; statement: string }[];
+  added: { subject: string; statement: string }[];
+  removed_characters: { id: number; name: string }[];
+  new_characters: string[];
+  status_changes: { name: string; status: string }[];
+  threads: { id: number | null; title: string; change: "removed" | "resolved" | "reopened" | "opened" }[];
+}
+
+/** The MemoryDiff the backend applies; the dashboard only removes items from it. */
+export interface MemoryDiff {
+  summary: string;
+  hook: string;
+  characters_present: string[];
+  retract_fact_ids: number[];
+  new_facts: { subject: string; statement: string }[];
+  new_characters: { name: string; role: string; description: string }[];
+  remove_character_ids: number[];
+  character_changes: { name: string; new_status: string; reason: string }[];
+  threads_opened: { title: string; description: string }[];
+  remove_thread_ids: number[];
+  resolve_thread_ids: number[];
+  reopen_thread_ids: number[];
+}
+
+export interface RippleProposal {
+  kind: "patch" | "rewrite";
+  edits: { find: string; replace: string }[];
+  text: string;
+  title: string;
+  note: string;
+}
+
+export interface RippleItem {
+  episode_number: number;
+  check_status: CheckStatus;
+  signals: { reasons: string[]; verdict: string | null };
+  conflicts: { quote: string; reason: string }[];
+  proposal: RippleProposal | null;
+  decision: RippleDecisionKind | null;
+  decision_note: string;
+  resulting_version: number | null;
+  decided_at: string | null;
+}
+
+export interface BeatChange {
+  episode: number;
+  before: string;
+  after: string;
+}
+
+export interface Ripple {
+  id: number;
+  source_episode: number;
+  from_version: number;
+  to_version: number;
+  status: RippleStatus;
+  is_restore: boolean;
+  diff: MemoryDiff | null;
+  change: RippleChange | null;
+  replan: { what_changed: string; changes: BeatChange[]; applied: number[] } | null;
+  summary: string;
+  cost_usd: number;
+  items: RippleItem[];
+  counts: RippleCounts;
+  created_at: string | null;
+  closed_at: string | null;
+}
+
+export interface EpisodeVersion {
+  version: number;
+  title: string;
+  text: string;
+  source: "written" | "human_edit" | "ripple_patch" | "ripple_rewrite" | "restore";
+  note: string;
+  ripple_id: number | null;
+  is_current: boolean;
+  is_pending: boolean;
+  created_at: string | null;
 }
 
 export interface Fact {
@@ -101,6 +220,10 @@ export interface Fact {
   subject: string;
   statement: string;
   source_episode: number;
+  source_version: number | null;
+  is_active: boolean;
+  retracted_reason: string;
+  retracted_by_ripple: number | null;
 }
 
 export interface Thread {
@@ -138,6 +261,7 @@ export interface Costs {
   planning_cost_usd: number;
   eval_cost_usd: number;
   cost_cap_per_episode_usd: number;
+  prompt_sizes: { episode: number; context_chars: number }[];
   per_episode: {
     episode: number;
     cost_usd: number;
@@ -261,7 +385,22 @@ export const api = {
   episode: (storyId: number, number: number) => request<Episode>(`/stories/${storyId}/episodes/${number}`),
   approveEpisode: (storyId: number, number: number) => post<{ ok: boolean }>(`/stories/${storyId}/episodes/${number}/approve`),
   editEpisode: (storyId: number, number: number, text: string, title?: string) =>
-    put<Episode>(`/stories/${storyId}/episodes/${number}`, { text, title }),
+    put<{ episode: Episode; ripple: Ripple | null }>(`/stories/${storyId}/episodes/${number}`, { text, title }),
+  versions: (storyId: number, number: number) => request<EpisodeVersion[]>(`/stories/${storyId}/episodes/${number}/versions`),
+  restoreVersion: (storyId: number, number: number, version: number) =>
+    post<Ripple>(`/stories/${storyId}/episodes/${number}/versions/${version}/restore`),
+
+  ripples: (storyId: number) => request<Ripple[]>(`/stories/${storyId}/ripples`),
+  ripple: (storyId: number, rippleId: number) => request<Ripple>(`/stories/${storyId}/ripples/${rippleId}`),
+  confirmMemory: (storyId: number, rippleId: number, diff: MemoryDiff | null) =>
+    post<{ ripple: Ripple; job: Job }>(`/stories/${storyId}/ripples/${rippleId}/confirm-memory`, { diff }),
+  cancelRipple: (storyId: number, rippleId: number) => post<Ripple>(`/stories/${storyId}/ripples/${rippleId}/cancel`),
+  decideItem: (storyId: number, rippleId: number, number: number, decision: RippleDecisionKind, text?: string, note = "") =>
+    post<{ ripple: Ripple; job: Job | null }>(`/stories/${storyId}/ripples/${rippleId}/items/${number}/decide`, { decision, text, note }),
+  acceptMinor: (storyId: number, rippleId: number) =>
+    post<{ ripple: Ripple; job: Job }>(`/stories/${storyId}/ripples/${rippleId}/accept-minor`),
+  approveReplan: (storyId: number, rippleId: number, episodes: number[] | null) =>
+    post<Ripple>(`/stories/${storyId}/ripples/${rippleId}/approve-replan`, { episodes }),
   rejectEpisode: (storyId: number, number: number, reason: string, rewriteNow = true) =>
     post<{ job: Job | null }>(`/stories/${storyId}/episodes/${number}/reject`, { reason, rewrite_now: rewriteNow }),
 
@@ -271,6 +410,7 @@ export const api = {
     request<{ ok: boolean }>(`/stories/${storyId}/directives/${directiveId}`, { method: "DELETE" }),
 
   memory: (storyId: number) => request<Memory>(`/stories/${storyId}/memory`),
+  memoryCheck: (storyId: number) => request<{ problems: string[] }>(`/stories/${storyId}/memory/check`),
   costs: (storyId: number) => request<Costs>(`/stories/${storyId}/costs`),
   job: (jobId: number) => request<Job>(`/jobs/${jobId}`),
 

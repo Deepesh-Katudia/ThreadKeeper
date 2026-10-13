@@ -259,7 +259,7 @@ def set_check(session, story_id: int, item: RippleItem, status: str, signals: di
 def update_continuity(session, story_id: int, item: RippleItem) -> None:
     get_episode(session, story_id, item.episode_number).continuity = {
         "ripple_id": item.ripple_id, "check_status": item.check_status, "decision": item.decision,
-        "resulting_version": item.resulting_version,
+        "resulting_version": item.resulting_version, "fix_kind": (item.proposal or {}).get("kind"),
     }
 
 

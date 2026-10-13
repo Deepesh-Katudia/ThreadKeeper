@@ -2,8 +2,9 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 
+import { TextDiff } from "@/components/TextDiff";
 import { AutoTextarea, Button, Card, ErrorBox, Spinner, StatusBadge } from "@/components/ui";
-import { api, Episode, Job } from "@/lib/api";
+import { api, Episode, EpisodeVersion, Job } from "@/lib/api";
 
 type Mode = "read" | "edit" | "reject";
 
@@ -13,11 +14,13 @@ export function EpisodeReview({
   number,
   isBusy,
   onChanged,
+  onRippleStarted,
 }: {
   storyId: number;
   number: number;
   isBusy: boolean;
   onChanged: (job?: Job | null) => void;
+  onRippleStarted?: () => void;
 }) {
   const [episode, setEpisode] = useState<Episode | null>(null);
   const [mode, setMode] = useState<Mode>("read");
@@ -47,7 +50,15 @@ export function EpisodeReview({
   }
 
   const approve = () => act(async () => void (await api.approveEpisode(storyId, number)));
-  const saveEdit = () => act(async () => { setEpisode(await api.editEpisode(storyId, number, draftText)); });
+  const saveEdit = () => act(async () => {
+    const saved = await api.editEpisode(storyId, number, draftText);
+    setEpisode(saved.episode);
+    if (saved.ripple) onRippleStarted?.();
+  });
+  const restore = (version: number) => act(async () => {
+    await api.restoreVersion(storyId, number, version);
+    onRippleStarted?.();
+  });
   const reject = () => act(async () => (await api.rejectEpisode(storyId, number, reason)).job);
   const rewriteStale = () =>
     act(async () => (await api.rejectEpisode(storyId, number, episode.human_note || "Rewrite against the updated story.")).job);
@@ -62,6 +73,7 @@ export function EpisodeReview({
           <span className="text-xs text-faint">Episode {episode.number}</span>
           <StatusBadge status={episode.status} />
           {episode.was_edited_by_human && <span className="text-[11px] text-violet-400">edited by a human</span>}
+          {episode.current_version && <span className="text-[11px] text-faint">v{episode.current_version}</span>}
         </div>
         {episode.title && <h2 className="mt-2 text-2xl font-semibold tracking-tight break-words">{episode.title}</h2>}
         <p className="mt-2 text-sm break-words text-muted"><span className="text-faint">Beat · </span>{episode.beat}</p>
@@ -93,7 +105,8 @@ export function EpisodeReview({
         <div className="mt-4 space-y-3">
           {episode.status === "approved" && (
             <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs break-words text-amber-300">
-              This episode is already canon. Saving rebuilds its memory (facts, deaths, threads) and marks later unapproved drafts stale.
+              This episode is already canon. Saving starts a ripple review: you confirm what changes in memory, then decide
+              on every later episode the change affects. Writing pauses until you finish.
             </p>
           )}
           <AutoTextarea value={draftText} onChange={(e) => setDraftText(e.target.value)} className="prose-episode p-4" />
@@ -126,6 +139,10 @@ export function EpisodeReview({
       )}
 
       <div className="mt-6 space-y-2">
+        {episode.status === "approved" && (
+          <VersionsPanel storyId={storyId} number={number} current={episode.current_version} locked={locked} onRestore={restore} />
+        )}
+        {episode.continuity && <ContinuityPanel episode={episode} />}
         {report.final && <CriticPanel episode={episode} />}
         {episode.status === "in_review" && <PendingMemory memory={episode.pending_memory} />}
         {report.context_sent && <ContextPanel sections={report.context_sent} />}
@@ -195,6 +212,83 @@ function ContextPanel({ sections }: { sections: Record<string, string> }) {
           </div>
         ))}
       </div>
+    </Disclosure>
+  );
+}
+
+const SOURCE_LABELS: Record<EpisodeVersion["source"], string> = {
+  written: "written", human_edit: "your edit", ripple_patch: "ripple fix", ripple_rewrite: "ripple rewrite", restore: "restored",
+};
+
+/** Every version of an approved episode: read any one, compare two, or restore one. */
+function VersionsPanel({ storyId, number, current, locked, onRestore }: {
+  storyId: number; number: number; current: number | null; locked: boolean; onRestore: (version: number) => void;
+}) {
+  const [versions, setVersions] = useState<EpisodeVersion[]>([]);
+  const [shown, setShown] = useState<number | null>(null);
+  const [compareWith, setCompareWith] = useState<number | null>(null);
+
+  useEffect(() => {
+    api.versions(storyId, number).then(setVersions).catch(() => setVersions([]));
+  }, [storyId, number, current]);
+
+  const saved = versions.filter((v) => !v.is_pending);
+  if (saved.length < 2) return null;
+  const view = saved.find((v) => v.version === shown) ?? saved.find((v) => v.is_current) ?? saved[saved.length - 1];
+  const other = saved.find((v) => v.version === compareWith && v.version !== view.version);
+
+  return (
+    <Disclosure title={`Versions · ${saved.length} (current v${current ?? "?"})`}>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {saved.map((v) => (
+            <button
+              key={v.version}
+              onClick={() => setShown(v.version)}
+              className={`rounded border px-2 py-0.5 text-xs ${v.version === view.version ? "border-line-strong bg-subtle text-fg" : "border-line text-muted hover:text-fg"}`}
+              title={v.note || SOURCE_LABELS[v.source]}
+            >
+              v{v.version} · {SOURCE_LABELS[v.source]}{v.is_current ? " · current" : ""}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+          Compare v{view.version} with
+          <select
+            value={other?.version ?? ""}
+            onChange={(e) => setCompareWith(e.target.value ? Number(e.target.value) : null)}
+            className="rounded-md border border-line bg-bg px-2 py-1 text-xs"
+          >
+            <option value="">nothing</option>
+            {saved.filter((v) => v.version !== view.version).map((v) => <option key={v.version} value={v.version}>v{v.version}</option>)}
+          </select>
+          {!view.is_current && (
+            <Button onClick={() => onRestore(view.version)} disabled={locked}>Restore v{view.version}</Button>
+          )}
+        </div>
+        <div className="max-h-96 overflow-y-auto rounded-lg border border-line p-3">
+          {other ? <TextDiff before={other.text} after={view.text} /> : <div className="prose-episode text-sm">{view.text}</div>}
+        </div>
+        {other && <p className="text-[11px] text-faint">Struck through: only in v{other.version}. Highlighted: only in v{view.version}.</p>}
+      </div>
+    </Disclosure>
+  );
+}
+
+const CONTINUITY_TEXT: Record<string, string> = {
+  unaffected: "Checked after an earlier edit: nothing here contradicts it.",
+  minor: "A small contradiction with an earlier edit was found.",
+  major: "This episode depends on something an earlier edit changed.",
+  recheck: "Re-checked after an earlier episode was fixed.",
+  pending: "Not checked: the ripple reached its cost cap.",
+};
+
+function ContinuityPanel({ episode }: { episode: Episode }) {
+  const c = episode.continuity!;
+  const outcome = c.decision === "keep" ? "Kept as written." : c.decision ? `Fixed (${c.decision}${c.resulting_version ? `, now v${c.resulting_version}` : ""}).` : "Waiting for a decision.";
+  return (
+    <Disclosure title={`Continuity · ripple #${c.ripple_id}: ${c.check_status}`}>
+      <p className="break-words text-muted">{CONTINUITY_TEXT[c.check_status]} {c.check_status !== "unaffected" && outcome}</p>
     </Disclosure>
   );
 }
